@@ -1,0 +1,49 @@
+{
+  "name": "@cluster-management/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "bun run build.ts",
+    "dev": "bun run dev.ts dist/cli.js",
+    "dev:worker": "bun run dev.ts dist/worker.js",
+    "start": "bun run dist/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "cli": "bun run dist/cli.js",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint . --ext .ts,.js",
+    "lint:fix": "eslint . --ext .ts,.js --fix",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.72",
+    "@langchain/langgraph": "^0.4.8",
+    "@langchain/ollama": "^0.1.0",
+    "@langchain/openai": "^0.6.9",
+    "@react-email/render": "^1.2.1",
+    "axios": "^1.7.0",
+    "chalk": "^5.6.0",
+    "clsx": "^2.1.1",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "sharp": "^0.33.0",
+    "tailwind-merge": "^3.3.1",
+    "uuid": "^9.0.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.0.0",
+    "bun-types": "latest",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "@types/jest": "^29.5.8",
+    "jest-fetch-mock": "^3.0.3"
+  },
+  "peerDependencies": {
+    "node-fetch": "^3.0.0"
+  }
+}
