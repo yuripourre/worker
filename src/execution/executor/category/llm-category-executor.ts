@@ -29,6 +29,7 @@ export class LLMCategoryExecutor implements CategoryExecutor {
       prompt: ctx.userPrompt ?? '',
       systemPrompt: ctx.systemPrompt,
       tools: ctx.tools,
+      jobToken: job.toolCallToken,
       image: ctx.image,
       numCtx: ctx.numCtx,
       numPredict: ctx.numPredict,

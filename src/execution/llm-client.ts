@@ -33,6 +33,8 @@ export interface LLMChatOptions {
   prompt: string;
   systemPrompt?: string;
   tools?: McpTool[];
+  /** Job-scoped token for MCP tool execution (Authorization: Bearer). */
+  jobToken?: string;
   image?: {
     fileName: string;
     mimeType: string;

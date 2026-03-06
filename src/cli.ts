@@ -603,6 +603,7 @@ class ExecutorCLI {
       context: job.context,
       status: 'pending',
       category: category as ExecutableJob['category'],
+      ...(job.toolCallToken && { toolCallToken: job.toolCallToken }),
     };
   }
 

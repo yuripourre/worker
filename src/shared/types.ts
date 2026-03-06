@@ -472,6 +472,8 @@ export interface Job {
   middlewareJobId?: string; // Original job ID from middleware if applicable
   priority?: JobPriority;
   requiredTags?: string[];
+  /** Short-lived token for MCP tool execution; set by server when returning job to worker. */
+  toolCallToken?: string;
 }
 
 // ============================================================================
@@ -491,6 +493,8 @@ export interface ExecutableJob {
   prompt?: string;
   statusOutputs?: StatusOutput[];
   category: JobCategoryType;
+  /** Short-lived token for MCP tool execution; from job payload. */
+  toolCallToken?: string;
 }
 
 /**

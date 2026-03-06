@@ -86,8 +86,9 @@ function extractTextFromContent(content: McpContent[]): string {
  * Build a LangChain DynamicStructuredTool from an MCP tool definition.
  * The tool calls POST _executeUrl with { arguments: input } and parses
  * the MCP-standard { content, isError } response.
+ * When jobToken is provided, sends Authorization: Bearer <jobToken>.
  */
-function createDynamicToolFromMcp(tool: McpTool): any {
+function createDynamicToolFromMcp(tool: McpTool, jobToken?: string): any {
   if (!tool.name || typeof tool.name !== 'string') {
     throw new Error('McpTool is missing required field "name"');
   }
@@ -100,6 +101,7 @@ function createDynamicToolFromMcp(tool: McpTool): any {
 
   const executeUrl = tool._executeUrl;
   const toolName = tool.name;
+  const headers: Record<string, string> = jobToken ? { Authorization: `Bearer ${jobToken}` } : {};
 
   // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
   return new DynamicStructuredTool({
@@ -110,7 +112,8 @@ function createDynamicToolFromMcp(tool: McpTool): any {
       try {
         const response = await axios.post<{ content?: McpContent[]; isError?: boolean; result?: unknown }>(
           executeUrl,
-          { arguments: input }
+          { arguments: input },
+          { headers }
         );
         const data = response.data;
         if (Array.isArray(data.content)) {
@@ -251,7 +254,7 @@ export class LangGraphLLMClient implements LLMClient {
     const toolErrors: string[] = [];
     for (const mcpTool of mcpTools) {
       try {
-        langchainTools.push(createDynamicToolFromMcp(mcpTool));
+        langchainTools.push(createDynamicToolFromMcp(mcpTool, options.jobToken));
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.error(`Failed to create tool ${mcpTool.name}:`, msg);
