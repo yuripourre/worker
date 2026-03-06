@@ -771,9 +771,9 @@ export class Worker {
   }
 
   /**
-   * Mark job as failed
+   * Mark job as failed (optional appId so server updates the correct app's job in middleware)
    */
-  async markJobFailed(jobId: string, error: string): Promise<void> {
+  async markJobFailed(jobId: string, error: string, appId?: string): Promise<void> {
     if (!this.config.deviceId) {
       throw new Error('Device not registered. Call registerDevice() first.');
     }
@@ -781,9 +781,10 @@ export class Worker {
     try {
       this.log('warn', `Marking job as failed: ${jobId} - ${error}`);
 
+      const body = { error, ...(appId && { appId }) };
       await this.makeRequest(`/jobs/${encodeURIComponent(jobId)}/fail`, {
         method: 'POST',
-        body: JSON.stringify({ error })
+        body: JSON.stringify(body)
       });
 
       this.log('info', `Job marked as failed: ${jobId}`);

@@ -481,6 +481,8 @@ class ExecutorCLI {
         console.warn(`⚠️ Failed to mark update job as completed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
+      // Clear so handleUpdate does not defer (it checks isProcessingJob)
+      this.isProcessingJob = false;
       await this.handleUpdate(this.client.getBaseUrl(), job.context as WorkerUpdateJobContext);
       return; // handleUpdate restarts the process
     }
@@ -493,7 +495,7 @@ class ExecutorCLI {
       const errorMessage = execError instanceof Error ? execError.message : 'Unknown error';
       console.error(`❌ Job execution failed: ${job.id}`, execError);
       try {
-        await this.client.markJobFailed(job.id, errorMessage);
+        await this.client.markJobFailed(job.id, errorMessage, (job as { appId?: string }).appId);
         console.log(`🔴 Job marked as failed: ${job.id}`);
       } catch (markError) {
         console.error('❌ Failed to mark job as failed:', markError);
@@ -528,7 +530,7 @@ class ExecutorCLI {
       // Mark as failed so the job stops cycling.
       console.error(`❌ Failed to submit result for job ${job.id}:`, submitError);
       try {
-        await this.client.markJobFailed(job.id, submitError instanceof Error ? submitError.message : 'Unknown error');
+        await this.client.markJobFailed(job.id, submitError instanceof Error ? submitError.message : 'Unknown error', (job as { appId?: string }).appId);
         console.log(`🔴 Job marked as failed: ${job.id}`);
       } catch (markError) {
         console.error('❌ Failed to mark job as failed:', markError);
