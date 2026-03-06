@@ -16,6 +16,13 @@ export class LLMCategoryExecutor implements CategoryExecutor {
       return { status: 'failed', answer: 'Invalid LLM job context' };
     }
     const ctx = job.context;
+    if (ctx.tools && ctx.tools.length > 0) {
+      console.log(`🔗 MCP tool execution URLs (${ctx.tools.length} tool(s)):`);
+      for (const t of ctx.tools) {
+        const url = t._executeUrl ?? '(missing _executeUrl)';
+        console.log(`   ${t.name}: ${url}`);
+      }
+    }
     const options = {
       model: ctx.model,
       temperature: ctx.temperature,
