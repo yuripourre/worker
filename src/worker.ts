@@ -47,9 +47,11 @@ export class Worker {
   private jobPollCount: number = 0;
   private readonly CAPABILITY_CHECK_INTERVAL = 6; // Check capabilities every 6 polls
 
-  // Model inventory state — sent with every registerForJob heartbeat
+  // Model inventory state — sent with every registerForJob heartbeat when changed
   private currentModelInventory: import('./shared').ModelInventory | undefined;
   private currentModelTags: string[] = [];
+  private lastSentModelInventoryJson: string | undefined;
+  private lastSentModelTagsJson: string | undefined;
 
   // Version tracking
   private readonly workerVersion: string;
@@ -488,6 +490,14 @@ export class Worker {
       capabilities = await this.checkCapabilitiesStatus();
     }
     const lastUpdateDate = this.getLastUpdateDate();
+    const currentInventoryJson =
+      this.currentModelInventory !== undefined ? JSON.stringify(this.currentModelInventory) : undefined;
+    const currentTagsJson =
+      this.currentModelTags.length > 0 ? JSON.stringify(this.currentModelTags) : undefined;
+    const includeModelInventory =
+      currentInventoryJson !== undefined && currentInventoryJson !== this.lastSentModelInventoryJson;
+    const includeTags =
+      currentTagsJson !== undefined && currentTagsJson !== this.lastSentModelTagsJson;
     return {
       ...resourceUsage,
       temperature: resourceUsageWithTemp.temperature,
@@ -496,8 +506,8 @@ export class Worker {
       capabilities,
       version: this.workerVersion,
       lastUpdateDate,
-      ...(this.currentModelInventory !== undefined && { modelInventory: this.currentModelInventory }),
-      ...(this.currentModelTags.length > 0 && { tags: this.currentModelTags }),
+      ...(includeModelInventory && this.currentModelInventory !== undefined && { modelInventory: this.currentModelInventory }),
+      ...(includeTags && this.currentModelTags.length > 0 && { tags: this.currentModelTags }),
     };
   }
 
@@ -528,6 +538,14 @@ export class Worker {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(35_000), // 5s buffer over 30s server timeout
     });
+    if (response.status === 204 || response.status === 200) {
+      if (heartbeatData.modelInventory !== undefined) {
+        this.lastSentModelInventoryJson = JSON.stringify(this.currentModelInventory);
+      }
+      if (heartbeatData.tags !== undefined) {
+        this.lastSentModelTagsJson = JSON.stringify(this.currentModelTags);
+      }
+    }
     if (response.status === 204) return null;
     if (response.status === 200) return response.json() as Promise<Job>;
     const errorText = await response.text().catch(() => '');
@@ -635,7 +653,7 @@ export class Worker {
   /**
    * Submit job result/answer and upload artifacts
    */
-  async submitJobResult(jobId: string, result: Omit<JobResult, 'completedAt'>): Promise<void> {
+  async submitJobResult(jobId: string, result: Omit<JobResult, 'completedAt'>, appId?: string): Promise<void> {
     if (!this.config.deviceId) {
       throw new Error('Device not registered. Call registerDevice() first.');
     }
@@ -657,10 +675,11 @@ export class Worker {
         }
       }
 
-      // Submit result
+      // Submit result (include appId so server updates the correct app's job)
+      const body = { ...result, ...(appId && { appId }) };
       await this.makeRequest(`/jobs/${encodeURIComponent(jobId)}/answer`, {
         method: 'POST',
-        body: JSON.stringify(result)
+        body: JSON.stringify(body)
       });
 
       this.log('info', `Job result submitted successfully: ${jobId}`);

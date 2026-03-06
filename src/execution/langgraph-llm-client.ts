@@ -8,7 +8,7 @@ import { StateGraph, END, Annotation } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { z } from "zod";
 import axios from "axios";
-import { ToolDefinition, ToolsDefinitionResponse } from '../shared';
+import type { McpTool, McpToolInputSchema, McpContent } from '../shared';
 
 const DEFAULT_MODEL = "qwen3:1.7b";
 const DEFAULT_TEMPERATURE = 0.7;
@@ -23,6 +23,7 @@ function buildChatOllamaConfig(
     topK?: number;
     repeatPenalty?: number;
     seed?: number;
+    format?: 'json' | Record<string, unknown>;
   }
 ) {
   return {
@@ -33,6 +34,7 @@ function buildChatOllamaConfig(
     ...(options.topK !== undefined && { topK: options.topK }),
     ...(options.repeatPenalty !== undefined && { repeatPenalty: options.repeatPenalty }),
     ...(options.seed !== undefined && { seed: options.seed }),
+    ...(options.format !== undefined && { format: options.format }),
   };
 }
 
@@ -42,87 +44,82 @@ const StateAnnotation = Annotation.Root({
   }),
 });
 
-function createZodSchema(parameters: ToolDefinition["parameters"]): z.ZodObject<any> {
+/**
+ * Build a Zod schema from an MCP inputSchema (JSON Schema object).
+ * Supports string, number, boolean, and enum fields.
+ */
+function buildZodSchemaFromInputSchema(inputSchema: McpToolInputSchema): z.ZodObject<any> {
   const schemaObj: Record<string, z.ZodTypeAny> = {};
-  parameters.forEach(param => {
+  const properties = inputSchema.properties ?? {};
+  const required = inputSchema.required ?? [];
+
+  for (const [paramName, paramDef] of Object.entries(properties)) {
     let field: z.ZodTypeAny;
-    if (param.enum) {
-      field = z.enum(param.enum as [string, ...string[]]);
-    } else if (param.type === 'number') {
+    if (Array.isArray(paramDef.enum) && paramDef.enum.length > 0) {
+      field = z.enum(paramDef.enum as [string, ...string[]]);
+    } else if (paramDef.type === 'number' || paramDef.type === 'integer') {
       field = z.number();
-    } else if (param.type === 'boolean') {
+    } else if (paramDef.type === 'boolean') {
       field = z.boolean();
     } else {
       field = z.string();
     }
-    field = field.describe(param.description);
-    if (!param.required) {
+    if (paramDef.description) {
+      field = field.describe(String(paramDef.description));
+    }
+    if (!required.includes(paramName)) {
       field = field.optional();
     }
-    schemaObj[param.name] = field;
-  });
+    schemaObj[paramName] = field;
+  }
   return z.object(schemaObj) as z.ZodObject<any>;
 }
 
-function createDynamicTool(toolDef: ToolDefinition, baseUrl: string): any {
-  // Validate required fields
-  if (!toolDef || typeof toolDef !== 'object') {
-    throw new Error('Tool definition is not a valid object');
-  }
-  if (!toolDef.name || typeof toolDef.name !== 'string') {
-    throw new Error('Tool definition is missing required field "name"');
-  }
-  if (!toolDef.endpoint || typeof toolDef.endpoint !== 'string') {
-    throw new Error(`Tool definition for "${toolDef.name || 'unknown'}" is missing required field "endpoint"`);
-  }
-  if (!toolDef.method || typeof toolDef.method !== 'string') {
-    throw new Error(`Tool definition for "${toolDef.name}" is missing required field "method"`);
-  }
-  if (!toolDef.parameters || !Array.isArray(toolDef.parameters)) {
-    throw new Error(`Tool definition for "${toolDef.name}" is missing or has invalid "parameters" field`);
-  }
+function extractTextFromContent(content: McpContent[]): string {
+  return content
+    .filter(c => c.type === 'text' && c.text != null)
+    .map(c => c.text as string)
+    .join('\n');
+}
 
-  // Capture values at creation time to avoid closure issues
-  const toolName = String(toolDef.name);
-  // Ensure endpoint is a valid non-empty string
-  const rawEndpoint = toolDef.endpoint;
-  if (!rawEndpoint || typeof rawEndpoint !== 'string' || rawEndpoint.trim().length === 0) {
-    throw new Error(`Tool definition for "${toolName}" has invalid endpoint: must be a non-empty string`);
+/**
+ * Build a LangChain DynamicStructuredTool from an MCP tool definition.
+ * The tool calls POST _executeUrl with { arguments: input } and parses
+ * the MCP-standard { content, isError } response.
+ */
+function createDynamicToolFromMcp(tool: McpTool): any {
+  if (!tool.name || typeof tool.name !== 'string') {
+    throw new Error('McpTool is missing required field "name"');
   }
-  const toolEndpoint = String(rawEndpoint).trim();
-  const toolMethod = String(toolDef.method).toUpperCase();
-  const toolParameters = Array.isArray(toolDef.parameters) ? toolDef.parameters : [];
+  if (!tool._executeUrl || typeof tool._executeUrl !== 'string') {
+    throw new Error(`McpTool "${tool.name}" is missing required field "_executeUrl"`);
+  }
 
   // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
-  const schema = createZodSchema(toolParameters);
+  const schema = buildZodSchemaFromInputSchema(tool.inputSchema ?? { type: 'object', properties: {}, required: [] });
+
+  const executeUrl = tool._executeUrl;
+
   // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
   return new DynamicStructuredTool({
-    name: toolDef.name,
-    description: toolDef.description,
-    schema: schema,
-    func: async (input: Record<string, any>) => {
-      // Resolve endpoint relative to base URL
-      const endpointUrl = toolDef.endpoint.startsWith('http')
-        ? toolDef.endpoint
-        : `${baseUrl}${toolDef.endpoint}`;
-      let response;
-      switch (toolDef.method) {
-        case "GET":
-          response = await axios.get(endpointUrl, { params: input });
-          break;
-        case "POST":
-          response = await axios.post(endpointUrl, input);
-          break;
-        case "PUT":
-          response = await axios.put(endpointUrl, input);
-          break;
-        case "DELETE":
-          response = await axios.delete(endpointUrl, { data: input });
-          break;
-        default:
-          throw new Error(`Unsupported HTTP method: ${toolDef.method}`);
+    name: tool.name,
+    description: tool.description ?? tool.title ?? tool.name,
+    schema,
+    func: async (input: Record<string, unknown>) => {
+      const response = await axios.post<{ content?: McpContent[]; isError?: boolean; result?: unknown }>(
+        executeUrl,
+        { arguments: input }
+      );
+      const data = response.data;
+      if (Array.isArray(data.content)) {
+        const text = extractTextFromContent(data.content);
+        if (data.isError) {
+          return `Error: ${text}`;
+        }
+        return text;
       }
-      return JSON.stringify(response.data);
+      // Fallback for non-standard responses
+      return data.result !== undefined ? JSON.stringify(data.result) : '';
     },
   });
 }
@@ -143,26 +140,10 @@ export class LangGraphLLMClient implements LLMClient {
 
   async chat(options: LLMChatOptions): Promise<LLMChatResponse> {
     try {
-      // Check if tools should be used
-      if (options.toolsUrl && options.toolsUrl.length > 0) {
-        return await this.chatWithTools({
-          model: options.model,
-          temperature: options.temperature,
-          prompt: options.prompt,
-          systemPrompt: options.systemPrompt,
-          maxTokens: options.numPredict,
-          image: options.image,
-          toolsUrl: options.toolsUrl,
-          numCtx: options.numCtx,
-          numPredict: options.numPredict,
-          topP: options.topP,
-          topK: options.topK,
-          repeatPenalty: options.repeatPenalty,
-          seed: options.seed,
-        });
-      } else {
-        return await this.chatWithoutTools(options);
+      if (options.tools && options.tools.length > 0) {
+        return await this.chatWithTools(options);
       }
+      return await this.chatWithoutTools(options);
     } catch (error) {
       console.error('LangGraph LLM call failed:', error);
       throw error;
@@ -185,19 +166,16 @@ export class LangGraphLLMClient implements LLMClient {
     topK?: number;
     repeatPenalty?: number;
     seed?: number;
+    format?: 'json' | Record<string, unknown>;
   }): Promise<LLMChatResponse> {
-    const baseUrl = this.config.baseUrl || "http://localhost:11434";
+    const ollamaBaseUrl = this.config.baseUrl || "http://localhost:11434";
     const model = options.model || this.config.defaultModel || DEFAULT_MODEL;
-    const temperature = options.temperature !== undefined ? options.temperature : this.config.defaultTemperature || 0.7;
+    const temperature = options.temperature !== undefined ? options.temperature : this.config.defaultTemperature || DEFAULT_TEMPERATURE;
     const numPredict = options.numPredict ?? this.config.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
+
     const llm = new ChatOllama(
       buildChatOllamaConfig(
-        {
-          model,
-          baseUrl,
-          temperature,
-          numPredict,
-        },
+        { model, baseUrl: ollamaBaseUrl, temperature, numPredict },
         {
           numCtx: options.numCtx,
           numPredict: options.numPredict,
@@ -205,18 +183,15 @@ export class LangGraphLLMClient implements LLMClient {
           topK: options.topK,
           repeatPenalty: options.repeatPenalty,
           seed: options.seed,
+          format: options.format,
         }
       )
     );
 
-    // Build messages
     const messages: BaseMessage[] = [];
-
     if (options.systemPrompt) {
       messages.push(new SystemMessage(options.systemPrompt));
     }
-
-    // Handle image if present
     if (options.image) {
       const imageDataUri = `data:${options.image.mimeType};base64,${options.image.data}`;
       messages.push(new HumanMessage({
@@ -230,138 +205,67 @@ export class LangGraphLLMClient implements LLMClient {
     }
 
     const response = await llm.invoke(messages);
-    const content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    const content = typeof response.content === 'string'
+      ? response.content
+      : JSON.stringify(response.content);
 
-    // Build debug info
     const debugInfo: LLMDebugInfo = {
       systemPrompt: options.systemPrompt,
       userPrompt: options.prompt,
-      model: options.model || this.config.defaultModel || DEFAULT_MODEL,
-      temperature: options.temperature !== undefined ? options.temperature : this.config.defaultTemperature || 0.7,
-      messages: messages.map(msg => {
-        if (msg instanceof SystemMessage) {
-          return { role: 'system' as const, content: msg.content };
-        } else if (msg instanceof HumanMessage) {
-          return { role: 'user' as const, content: msg.content };
-        } else {
-          return { role: 'assistant' as const, content: msg.content };
-        }
-      }).concat([{ role: 'assistant' as const, content: response.content }])
+      model,
+      temperature,
     };
 
-    return {
-      content,
-      debugInfo
-    };
+    return { content, debugInfo };
   }
 
-  private async chatWithTools(options: {
-    model: string;
-    temperature: number;
-    prompt: string;
-    systemPrompt?: string;
-    maxTokens?: number;
-    image?: {
-      fileName: string;
-      mimeType: string;
-      data: string;
-    };
-    toolsUrl: string;
-    numCtx?: number;
-    numPredict?: number;
-    topP?: number;
-    topK?: number;
-    repeatPenalty?: number;
-    seed?: number;
-  }): Promise<LLMChatResponse> {
-    // Fetch tool definitions
-    const response = await axios.get<ToolsDefinitionResponse>(options.toolsUrl);
-    const toolDefs = response.data.tools || [];
+  private async chatWithTools(options: LLMChatOptions): Promise<LLMChatResponse> {
+    const mcpTools = options.tools!;
 
-    // If no tool definitions are provided, fall back to execution without tools
-    if (!toolDefs || toolDefs.length === 0) {
-      console.warn(`No tools found at ${options.toolsUrl}, falling back to execution without tools`);
-      return await this.chatWithoutTools({
-        model: options.model,
-        temperature: options.temperature,
-        prompt: options.prompt,
-        systemPrompt: options.systemPrompt,
-        image: options.image,
-        numCtx: options.numCtx,
-        numPredict: options.numPredict,
-        topP: options.topP,
-        topK: options.topK,
-        repeatPenalty: options.repeatPenalty,
-        seed: options.seed,
-      });
-    }
-
-    const toolsUrlObj = new URL(options.toolsUrl);
-    const baseUrl = `${toolsUrlObj.protocol}//${toolsUrlObj.host}`;
-
-    // Create tools with error handling
-    const tools: any[] = [];
+    // Build LangChain tools, skipping any that fail to construct
+    const langchainTools: any[] = [];
     const toolErrors: string[] = [];
-    for (const def of toolDefs) {
+    for (const mcpTool of mcpTools) {
       try {
-        const tool = createDynamicTool(def, baseUrl);
-        tools.push(tool);
+        langchainTools.push(createDynamicToolFromMcp(mcpTool));
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`Failed to create tool ${def.name}:`, errorMessage);
-        toolErrors.push(`Tool ${def.name}: ${errorMessage}`);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`Failed to create tool ${mcpTool.name}:`, msg);
+        toolErrors.push(`${mcpTool.name}: ${msg}`);
       }
     }
 
-    // If no valid tools could be created, fall back to execution without tools
-    if (tools.length === 0) {
-      console.warn(`No valid tools could be created. Errors: ${toolErrors.join('; ')}. Falling back to execution without tools`);
-      return await this.chatWithoutTools({
-        model: options.model,
-        temperature: options.temperature,
-        prompt: options.prompt,
-        systemPrompt: options.systemPrompt,
-        image: options.image,
-        numCtx: options.numCtx,
-        numPredict: options.numPredict,
-        topP: options.topP,
-        topK: options.topK,
-        repeatPenalty: options.repeatPenalty,
-        seed: options.seed,
-      });
+    if (langchainTools.length === 0) {
+      console.warn(`No valid tools; errors: ${toolErrors.join('; ')}. Falling back to plain LLM.`);
+      return this.chatWithoutTools(options);
     }
-
     if (toolErrors.length > 0) {
       console.warn(`Some tools failed to load: ${toolErrors.join('; ')}`);
     }
 
-    // Create LLM with tools
     const ollamaBaseUrl = this.config.baseUrl || "http://localhost:11434";
     const model = options.model || this.config.defaultModel || DEFAULT_MODEL;
-    const temperature = options.temperature !== undefined ? options.temperature : this.config.defaultTemperature || 0.7;
-    const numPredict = options.maxTokens ?? options.numPredict ?? this.config.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
+    const temperature = options.temperature !== undefined ? options.temperature : this.config.defaultTemperature || DEFAULT_TEMPERATURE;
+    const numPredict = options.numPredict ?? this.config.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
+
     const llm = new ChatOllama(
       buildChatOllamaConfig(
-        {
-          model,
-          baseUrl: ollamaBaseUrl,
-          temperature,
-          numPredict,
-        },
+        { model, baseUrl: ollamaBaseUrl, temperature, numPredict },
         {
           numCtx: options.numCtx,
-          numPredict: options.numPredict ?? options.maxTokens,
+          numPredict: options.numPredict,
           topP: options.topP,
           topK: options.topK,
           repeatPenalty: options.repeatPenalty,
           seed: options.seed,
+          format: options.format,
         }
       )
     );
 
-    // Type assertions needed due to TypeScript's limitations with complex generic types in LangChain
-    const llmWithTools = llm.bindTools(tools as any);
-    const toolNode = new ToolNode(tools as any);
+    // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
+    const llmWithTools = llm.bindTools(langchainTools as any);
+    const toolNode = new ToolNode(langchainTools as any);
 
     const callModel = async (state: typeof StateAnnotation.State) => {
       const response = await llmWithTools.invoke(state.messages);
@@ -369,39 +273,30 @@ export class LangGraphLLMClient implements LLMClient {
     };
 
     const shouldContinue = (state: typeof StateAnnotation.State) => {
-      if (state.messages.length === 0) {
-        return END;
-      }
+      if (state.messages.length === 0) return END;
       const lastMessage = state.messages[state.messages.length - 1];
-      if (!lastMessage) {
-        return END;
-      }
-      return ("tool_calls" in lastMessage &&
-              Array.isArray(lastMessage.tool_calls) &&
-              lastMessage.tool_calls.length > 0) ? "tools" : END;
+      if (!lastMessage) return END;
+      return ('tool_calls' in lastMessage &&
+        Array.isArray(lastMessage.tool_calls) &&
+        lastMessage.tool_calls.length > 0)
+        ? 'tools'
+        : END;
     };
 
     const workflow = new StateGraph(StateAnnotation)
-      .addNode("agent", callModel)
-      .addNode("tools", toolNode)
-      .addEdge("__start__", "agent")
-      .addConditionalEdges("agent", shouldContinue, {
-        tools: "tools",
-        [END]: END,
-      })
-      .addEdge("tools", "agent");
+      .addNode('agent', callModel)
+      .addNode('tools', toolNode)
+      .addEdge('__start__', 'agent')
+      .addConditionalEdges('agent', shouldContinue, { tools: 'tools', [END]: END })
+      .addEdge('tools', 'agent');
 
     const app = workflow.compile();
 
-    // Build messages
     const messages: BaseMessage[] = [];
-
     if (options.systemPrompt) {
       messages.push(new SystemMessage(options.systemPrompt));
     }
-
-    // Handle image if present
-   if (options.image) {
+    if (options.image) {
       const imageDataUri = `data:${options.image.mimeType};base64,${options.image.data}`;
       messages.push(new HumanMessage({
         content: [
@@ -418,44 +313,42 @@ export class LangGraphLLMClient implements LLMClient {
       { configurable: { recursionLimit: 100 } }
     );
 
-    // Extract the final response
     const lastMessage = result.messages[result.messages.length - 1];
-    const content = typeof lastMessage.content === 'string' ? lastMessage.content : JSON.stringify(lastMessage.content);
+    const content = typeof lastMessage.content === 'string'
+      ? lastMessage.content
+      : JSON.stringify(lastMessage.content);
 
-    // Extract tool calls from messages
+    // Extract tool call debug info
     const toolCalls: LLMDebugInfo['toolCalls'] = [];
     for (const msg of result.messages) {
       if ('tool_calls' in msg && Array.isArray(msg.tool_calls)) {
         for (const toolCall of msg.tool_calls) {
-          // Find the corresponding tool result message
           const toolResultMsg = result.messages.find(m =>
             'role' in m && m.role === 'tool' &&
             'tool_call_id' in m && m.tool_call_id === toolCall.id
           );
-
           toolCalls.push({
             name: toolCall.name || 'unknown',
             args: toolCall.args || {},
             result: toolResultMsg && 'content' in toolResultMsg
               ? (typeof toolResultMsg.content === 'string' ? toolResultMsg.content : JSON.stringify(toolResultMsg.content))
-              : undefined
+              : undefined,
           });
         }
       }
     }
 
-    // Build debug info
     const debugInfo: LLMDebugInfo = {
       systemPrompt: options.systemPrompt,
       userPrompt: options.prompt,
-      model: options.model || this.config.defaultModel || DEFAULT_MODEL,
-      temperature: options.temperature !== undefined ? options.temperature : this.config.defaultTemperature || 0.7,
+      model,
+      temperature,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      availableTools: toolDefs.map(tool => ({
-        name: tool.name,
-        description: tool.description || '',
-        endpoint: tool.endpoint,
-        method: tool.method
+      availableTools: mcpTools.map(t => ({
+        name: t.name,
+        description: t.description,
+        serverId: t.serverId,
+        _executeUrl: t._executeUrl,
       })),
       messages: result.messages.map(msg => {
         if (msg instanceof SystemMessage) {
@@ -464,16 +357,12 @@ export class LangGraphLLMClient implements LLMClient {
           return { role: 'user' as const, content: msg.content };
         } else if ('role' in msg && msg.role === 'tool') {
           return { role: 'tool' as const, content: 'content' in msg ? msg.content : '' };
-        } else {
-          return { role: 'assistant' as const, content: 'content' in msg ? msg.content : '' };
         }
-      })
+        return { role: 'assistant' as const, content: 'content' in msg ? msg.content : '' };
+      }),
     };
 
-    return {
-      content,
-      debugInfo
-    };
+    return { content, debugInfo };
   }
 
   getConfig(): LLMConfig {
@@ -485,7 +374,7 @@ export class LangGraphLLMClient implements LLMClient {
     this.llm = new ChatOllama({
       model: this.config.defaultModel || DEFAULT_MODEL,
       baseUrl: this.config.baseUrl || "http://localhost:11434",
-      temperature: this.config.defaultTemperature || 0.7,
+      temperature: this.config.defaultTemperature || DEFAULT_TEMPERATURE,
       numPredict: this.config.defaultMaxTokens,
     });
   }
@@ -500,11 +389,10 @@ export class LangGraphLLMClient implements LLMClient {
 
   async checkStatus(): Promise<boolean> {
     try {
-      // Check if Ollama is accessible by making a simple request
       const baseUrl = this.config.baseUrl || 'http://localhost:11434';
       await axios.get(`${baseUrl}/api/tags`);
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }

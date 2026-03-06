@@ -259,7 +259,7 @@ class ExecutorCLI {
           modelTags.push(`${prefix}${f.name}`);
         }
       }
-      this.lastModelInventoryJson = JSON.stringify(modelInventory ?? null);
+      this.lastModelInventoryJson = ExecutorCLI.inventoryForComparison(modelInventory) ?? 'null';
       this.client.setModelInventory(modelInventory, modelTags);
 
       const savedDeviceId = (this.client as any).config?.deviceId;
@@ -362,6 +362,21 @@ class ExecutorCLI {
 
   private readonly MODEL_INVENTORY_REFRESH_INTERVAL = 10;
 
+  /** Strip volatile fields so comparison only considers model identity (names/counts), not timestamps. */
+  private static inventoryForComparison(inventory: { lastUpdated?: string; ollamaModels?: Array<{ name: string; size: number; modified_at?: string; digest?: string }>; comfyuiModels?: Array<{ name: string; path: string; fileCount?: number; files?: Array<{ name: string; size: number; modified?: string; path: string }> }> } | null | undefined): string | null {
+    if (!inventory) return null;
+    const normalized = {
+      ollamaModels: inventory.ollamaModels?.map(m => ({ name: m.name, size: m.size })),
+      comfyuiModels: inventory.comfyuiModels?.map(cat => ({
+        name: cat.name,
+        path: cat.path,
+        fileCount: cat.fileCount ?? cat.files?.length ?? 0,
+        files: cat.files?.map(f => ({ name: f.name, size: f.size, path: f.path })),
+      })),
+    };
+    return JSON.stringify(normalized);
+  }
+
   private async refreshModelInventoryIfNeeded(): Promise<void> {
     if (this.pollCount % this.MODEL_INVENTORY_REFRESH_INTERVAL !== 0 || !this.deviceId) return;
     try {
@@ -370,7 +385,7 @@ class ExecutorCLI {
         this.options.ollamaBaseUrl,
         (this.client as any).config?.comfyuiPath
       );
-      const newJson = JSON.stringify(newInventory ?? null);
+      const newJson = ExecutorCLI.inventoryForComparison(newInventory) ?? 'null';
       if (newJson === this.lastModelInventoryJson) return;
 
       const newTags: string[] = [];
@@ -460,7 +475,7 @@ class ExecutorCLI {
           text: 'Worker update initiated',
           artifacts: [],
           rating: 5,
-        });
+        }, (job as { appId?: string }).appId);
       } catch (error) {
         console.warn(`⚠️ Failed to mark update job as completed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
@@ -494,7 +509,7 @@ class ExecutorCLI {
       rating: result.rating,
     };
     try {
-      await this.client.submitJobResult(job.id, jobResult);
+      await this.client.submitJobResult(job.id, jobResult, (job as { appId?: string }).appId);
       console.log(`✅ Job completed successfully: ${job.id}`);
 
       this.isProcessingJob = false;

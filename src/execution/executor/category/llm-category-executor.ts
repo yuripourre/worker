@@ -21,7 +21,7 @@ export class LLMCategoryExecutor implements CategoryExecutor {
       temperature: ctx.temperature,
       prompt: ctx.userPrompt ?? '',
       systemPrompt: ctx.systemPrompt,
-      toolsUrl: ctx.toolsUrl,
+      tools: ctx.tools,
       image: ctx.image,
       numCtx: ctx.numCtx,
       numPredict: ctx.numPredict,
@@ -30,6 +30,7 @@ export class LLMCategoryExecutor implements CategoryExecutor {
       topK: ctx.topK,
       repeatPenalty: ctx.repeatPenalty,
       seed: ctx.seed,
+      format: ctx.format,
     };
     const response = await this.llmClient.chat(options);
     const result: ExecutableJobResult = {

@@ -94,20 +94,9 @@ export interface ResourceUsage {
 // Simplified Job Context Types
 // ============================================================================
 
-/**
- * Job categories determining execution strategy
- */
-export enum JobCategory {
-  LLM = 'llm',
-  IMAGE_GENERATION = 'image_generation',
-  FILE_REQUEST = 'file_request',
-  SCRIPT = 'script',
-  HTTP_REQUEST = 'http_request',
-  IMAGE = 'image',
-  INFORMATION_REQUEST = 'information_request',
-  MODEL_MANAGEMENT = 'model_management',
-  WORKER_UPDATE = 'worker_update',
-}
+import { JobCategory as JobCategoryConst, type JobCategoryType } from './job-category.js';
+
+export const JobCategory = JobCategoryConst;
 
 /**
  * Base job context with common fields
@@ -127,17 +116,60 @@ export type OutputType = 'text' | 'image' | 'artifact';
  */
 export type LLMThinkLevel = 'low' | 'medium' | 'high';
 
+// ============================================================================
+// MCP (Model Context Protocol) Types
+// ============================================================================
+
+export interface McpToolInputSchema {
+  type: 'object';
+  properties?: Record<string, {
+    type: string;
+    description?: string;
+    enum?: string[];
+    [key: string]: unknown;
+  }>;
+  required?: string[];
+}
+
+export interface McpTool {
+  name: string;
+  title?: string;
+  description?: string;
+  serverId: string;
+  inputSchema: McpToolInputSchema;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+  };
+  _executeUrl: string;
+}
+
+export interface McpContent {
+  type: 'text' | 'image' | 'audio' | 'resource_link' | 'resource';
+  text?: string;
+  data?: string;
+  mimeType?: string;
+  [key: string]: unknown;
+}
+
+export interface McpToolResult {
+  content: McpContent[];
+  isError: boolean;
+}
+
 /**
  * LLM-specific job context
  */
 export interface LLMJobContext extends BaseJobContext {
-  category: JobCategory.LLM;
+  category: (typeof JobCategoryConst)['LLM'];
   model: string;
   temperature: number;
   outputType?: OutputType;
   systemPrompt?: string;
   userPrompt?: string;
-  toolsUrl?: string;
+  /** MCP tools to make available to the LLM during this job */
+  tools?: McpTool[];
   image?: {
     fileName: string;
     mimeType: string;
@@ -163,7 +195,7 @@ export interface LLMJobContext extends BaseJobContext {
  * Script execution job context
  */
 export interface ScriptJobContext extends BaseJobContext {
-  category: JobCategory.SCRIPT;
+  category: (typeof JobCategoryConst)['SCRIPT'];
   scriptContent: string;
   language: string;
   timeout?: number;
@@ -179,7 +211,7 @@ export interface ScriptJobContext extends BaseJobContext {
  * File request job context
  */
 export interface FileRequestJobContext extends BaseJobContext {
-  category: JobCategory.FILE_REQUEST;
+  category: (typeof JobCategoryConst)['FILE_REQUEST'];
   requester: string;
   fileName: string;
 }
@@ -191,7 +223,7 @@ export interface FileRequestJobContext extends BaseJobContext {
  * 2. Queue mode: provide prompt (positive), negativePrompt (negative), seed, and optional promptId
  */
 export interface ImageGenerationJobContext extends BaseJobContext {
-  category: JobCategory.IMAGE_GENERATION;
+  category: (typeof JobCategoryConst)['IMAGE_GENERATION'];
   prompt: string; // Used as "positive" prompt in queue mode
   negativePrompt?: string; // Used as "negative" prompt in queue mode
   seed?: number; // Seed for image generation
@@ -211,7 +243,7 @@ export interface ImageGenerationJobContext extends BaseJobContext {
  * HTTP request job context
  */
 export interface HttpRequestJobContext extends BaseJobContext {
-  category: JobCategory.HTTP_REQUEST;
+  category: (typeof JobCategoryConst)['HTTP_REQUEST'];
   url: string;
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
   headers?: Record<string, string>;
@@ -230,7 +262,7 @@ export interface HttpRequestJobContext extends BaseJobContext {
  * Image processing job context
  */
 export interface ImageJobContext extends BaseJobContext {
-  category: JobCategory.IMAGE;
+  category: (typeof JobCategoryConst)['IMAGE'];
   operation:
     | 'resize'
     | 'crop'
@@ -282,37 +314,37 @@ export type JobContext =
  * Type guard functions for job contexts
  */
 export function isLLMJobContext(context: JobContext): context is LLMJobContext {
-  return context.category === JobCategory.LLM;
+  return context.category === JobCategoryConst.LLM;
 }
 
 export function isScriptJobContext(
   context: JobContext
 ): context is ScriptJobContext {
-  return context.category === JobCategory.SCRIPT;
+  return context.category === JobCategoryConst.SCRIPT;
 }
 
 export function isFileRequestJobContext(
   context: JobContext
 ): context is FileRequestJobContext {
-  return context.category === JobCategory.FILE_REQUEST;
+  return context.category === JobCategoryConst.FILE_REQUEST;
 }
 
 export function isImageGenerationJobContext(
   context: JobContext
 ): context is ImageGenerationJobContext {
-  return context.category === JobCategory.IMAGE_GENERATION;
+  return context.category === JobCategoryConst.IMAGE_GENERATION;
 }
 
 export function isHttpRequestJobContext(
   context: JobContext
 ): context is HttpRequestJobContext {
-  return context.category === JobCategory.HTTP_REQUEST;
+  return context.category === JobCategoryConst.HTTP_REQUEST;
 }
 
 export function isImageJobContext(
   context: JobContext
 ): context is ImageJobContext {
-  return context.category === JobCategory.IMAGE;
+  return context.category === JobCategoryConst.IMAGE;
 }
 
 /**
@@ -320,7 +352,7 @@ export function isImageJobContext(
  * Used to request workers to send back system information
  */
 export interface InformationRequestJobContext extends BaseJobContext {
-  category: JobCategory.INFORMATION_REQUEST;
+  category: (typeof JobCategoryConst)['INFORMATION_REQUEST'];
   informationType:
     | 'ollama_models'
     | 'comfyui_models'
@@ -333,7 +365,7 @@ export interface InformationRequestJobContext extends BaseJobContext {
 export function isInformationRequestJobContext(
   context: JobContext
 ): context is InformationRequestJobContext {
-  return context.category === JobCategory.INFORMATION_REQUEST;
+  return context.category === JobCategoryConst.INFORMATION_REQUEST;
 }
 
 /**
@@ -341,7 +373,7 @@ export function isInformationRequestJobContext(
  * Used to install/remove models on workers
  */
 export interface ModelManagementJobContext extends BaseJobContext {
-  category: JobCategory.MODEL_MANAGEMENT;
+  category: (typeof JobCategoryConst)['MODEL_MANAGEMENT'];
   operation: 'install' | 'remove' | 'update';
   service: 'ollama' | 'comfyui';
   modelName: string;
@@ -353,7 +385,7 @@ export interface ModelManagementJobContext extends BaseJobContext {
 export function isModelManagementJobContext(
   context: JobContext
 ): context is ModelManagementJobContext {
-  return context.category === JobCategory.MODEL_MANAGEMENT;
+  return context.category === JobCategoryConst.MODEL_MANAGEMENT;
 }
 
 /**
@@ -362,32 +394,22 @@ export function isModelManagementJobContext(
  * Worker will use its existing baseUrl to download the update package
  */
 export interface WorkerUpdateJobContext extends BaseJobContext {
-  category: JobCategory.WORKER_UPDATE;
+  category: (typeof JobCategoryConst)['WORKER_UPDATE'];
 }
 
 export function isWorkerUpdateJobContext(
   context: JobContext
 ): context is WorkerUpdateJobContext {
-  return context.category === JobCategory.WORKER_UPDATE;
+  return context.category === JobCategoryConst.WORKER_UPDATE;
 }
 
 // ============================================================================
 // Job Types
 // ============================================================================
 
-/**
- * Job status values
- */
-export type JobStatus =
-  | 'pending'
-  | 'reserved'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'insufficient'
-  | 'waiting'
-  | 'in_progress'
-  | 'claimed';
+import { JobStatus as JobStatusConst, type JobStatusType } from './job-status.js';
+
+export const JobStatus = JobStatusConst;
 
 /**
  * Status output for job progress tracking
@@ -432,8 +454,8 @@ export interface JobResult {
 export interface Job {
   id: string;
   context: JobContext;
-  category?: JobCategory;
-  status: JobStatus;
+  category?: JobCategoryType;
+  status: JobStatusType;
   assignedDeviceId?: string;
   assignedWorkerId?: string;
   workerId?: string;
@@ -458,13 +480,13 @@ export interface Job {
 export interface ExecutableJob {
   id: string;
   context: JobContext;
-  status: JobStatus;
+  status: JobStatusType;
   startTime?: string;
   endTime?: string;
   answer?: string;
   prompt?: string;
   statusOutputs?: StatusOutput[];
-  category: JobCategory;
+  category: JobCategoryType;
 }
 
 /**
@@ -570,7 +592,7 @@ export type JobPriority = 'low' | 'normal' | 'high' | 'critical';
  */
 export interface CreateJobRequest {
   context: JobContext;
-  category?: JobCategory;
+  category?: JobCategoryType;
   webhook?: string;
   assignedDeviceId?: string; // Optional: assign job to a specific device/worker
   priority?: JobPriority;
@@ -618,31 +640,3 @@ export interface WorkerOptions {
   logLevel?: 'none' | 'error' | 'warn' | 'info' | 'debug';
 }
 
-// ============================================================================
-// Tool Definition Types
-// ============================================================================
-
-/**
- * Tool definition types for LangGraph dynamic tool integration
- * These types can be shared across client and worker modules
- */
-
-export interface ToolParameter {
-  name: string;
-  type: 'string' | 'number' | 'boolean';
-  description: string;
-  required: boolean;
-  enum?: string[];
-}
-
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  endpoint: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  parameters: ToolParameter[];
-}
-
-export interface ToolsDefinitionResponse {
-  tools: ToolDefinition[];
-}
