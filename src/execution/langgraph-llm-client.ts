@@ -99,6 +99,7 @@ function createDynamicToolFromMcp(tool: McpTool): any {
   const schema = buildZodSchemaFromInputSchema(tool.inputSchema ?? { type: 'object', properties: {}, required: [] });
 
   const executeUrl = tool._executeUrl;
+  const toolName = tool.name;
 
   // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
   return new DynamicStructuredTool({
@@ -106,20 +107,43 @@ function createDynamicToolFromMcp(tool: McpTool): any {
     description: tool.description ?? tool.title ?? tool.name,
     schema,
     func: async (input: Record<string, unknown>) => {
-      const response = await axios.post<{ content?: McpContent[]; isError?: boolean; result?: unknown }>(
-        executeUrl,
-        { arguments: input }
-      );
-      const data = response.data;
-      if (Array.isArray(data.content)) {
-        const text = extractTextFromContent(data.content);
-        if (data.isError) {
-          return `Error: ${text}`;
+      try {
+        const response = await axios.post<{ content?: McpContent[]; isError?: boolean; result?: unknown }>(
+          executeUrl,
+          { arguments: input }
+        );
+        const data = response.data;
+        if (Array.isArray(data.content)) {
+          const text = extractTextFromContent(data.content);
+          if (data.isError) {
+            return `Error: ${text}`;
+          }
+          return text;
         }
-        return text;
+        // Fallback for non-standard responses
+        return data.result !== undefined ? JSON.stringify(data.result) : '';
+      } catch (error) {
+        if (axios.isAxiosError(error)) {
+          if (error.response) {
+            const status = error.response.status;
+            const statusText = error.response.statusText ?? '';
+            const bodySummary =
+              typeof error.response.data === 'string'
+                ? error.response.data.slice(0, 200)
+                : JSON.stringify(error.response.data ?? {}).slice(0, 200);
+            console.error(
+              `[MCP tool] ${toolName} failed: POST ${executeUrl} -> ${status} ${statusText}`
+            );
+            console.error(`[MCP tool] response: ${bodySummary}`);
+          } else {
+            console.error(`[MCP tool] ${toolName} failed: POST ${executeUrl} -> ${error.message}`);
+          }
+        } else {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[MCP tool] ${toolName} failed: POST ${executeUrl} -> ${msg}`);
+        }
+        throw error;
       }
-      // Fallback for non-standard responses
-      return data.result !== undefined ? JSON.stringify(data.result) : '';
     },
   });
 }
