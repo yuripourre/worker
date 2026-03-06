@@ -102,6 +102,9 @@ function createDynamicToolFromMcp(tool: McpTool, jobToken?: string): any {
   const executeUrl = tool._executeUrl;
   const toolName = tool.name;
   const headers: Record<string, string> = jobToken ? { Authorization: `Bearer ${jobToken}` } : {};
+  if (!jobToken) {
+    console.warn(`[MCP tool] ${toolName}: no jobToken — worker may have received job without toolCallToken; MCP execute may return 401`);
+  }
 
   // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
   return new DynamicStructuredTool({
