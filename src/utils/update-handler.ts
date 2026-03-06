@@ -1,17 +1,19 @@
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, mkdirSync, createWriteStream } from 'fs';
-import { join, dirname } from 'path';
-import { tmpdir } from 'os';
-import { getWorkerVersion, compareVersions } from './version-utils';
+import { join } from 'path';
+import { tmpdir, homedir } from 'os';
+import { getWorkerVersion } from './version-utils';
 
 const execAsync = promisify(exec);
 
+const DEFAULT_CLONE_PATH = join(homedir(), '.worker-update');
+
 export interface UpdateOptions {
   /**
-   * Method to use for update: 'git', 'server', or 'manual'
+   * Method to use for update: 'git', 'server', 'manual', or 'repo'
    */
-  method?: 'git' | 'server' | 'manual';
+  method?: 'git' | 'server' | 'manual' | 'repo';
 
   /**
    * Git repository path (for git method)
@@ -22,6 +24,16 @@ export interface UpdateOptions {
    * Server URL for downloading package (for server method)
    */
   serverUrl?: string;
+
+  /**
+   * Git clone URL for repo method (e.g. https://github.com/yuripourre/worker.git)
+   */
+  gitRepoUrl?: string;
+
+  /**
+   * Target directory for clone (repo method). Defaults to ~/.worker-update
+   */
+  clonePath?: string;
 
   /**
    * Whether to restart after update
@@ -196,6 +208,72 @@ async function updateViaServer(serverUrl: string, workerPath: string = process.c
 }
 
 /**
+ * Clone or pull repo, then install and build. Used for 'repo' update method.
+ */
+async function updateViaRepo(gitRepoUrl: string, clonePath: string): Promise<void> {
+  try {
+    const parentDir = join(clonePath, '..');
+    if (!existsSync(parentDir)) {
+      mkdirSync(parentDir, { recursive: true });
+    }
+
+    if (existsSync(clonePath) && isGitRepository(clonePath)) {
+      console.log('📥 Pulling latest changes from git...');
+      const { stdout, stderr } = await execAsync('git pull', { cwd: clonePath });
+      if (stderr && !stderr.includes('Already up to date')) {
+        console.warn('⚠️ Git pull warnings:', stderr);
+      }
+      if (stdout) console.log(stdout);
+    } else {
+      if (existsSync(clonePath)) {
+        await execAsync(`rm -rf "${clonePath}"`);
+      }
+      console.log(`📥 Cloning ${gitRepoUrl} into ${clonePath}...`);
+      await execAsync(`git clone "${gitRepoUrl}" "${clonePath}"`, {
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    }
+
+    console.log('📦 Installing dependencies...');
+    await execAsync('bun install', { cwd: clonePath, maxBuffer: 10 * 1024 * 1024 });
+
+    console.log('🔨 Building worker package...');
+    const { stdout: buildStdout, stderr: buildStderr } = await execAsync('bun run build', {
+      cwd: clonePath,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (buildStderr) console.warn('⚠️ Build warnings:', buildStderr);
+    if (buildStdout) console.log(buildStdout);
+
+    const entryPath = join(clonePath, 'dist', 'cli.js');
+    if (!existsSync(entryPath)) {
+      throw new Error(`Build output not found at ${entryPath}`);
+    }
+    console.log('✅ Repo update completed');
+  } catch (error) {
+    console.error('❌ Repo update failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Restart by running the worker from the cloned directory with same argv and env.
+ */
+function restartProcessFromClone(clonePath: string): void {
+  console.log('🔄 Restarting worker process from clone...');
+  const entryPath = join(clonePath, 'dist', 'cli.js');
+  const args = process.argv.slice(2);
+  const child = spawn('bun', [entryPath, ...args], {
+    cwd: clonePath,
+    env: process.env,
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  setTimeout(() => process.exit(0), 1000);
+}
+
+/**
  * Perform manual update using a custom command
  */
 async function updateViaManual(command: string): Promise<void> {
@@ -259,6 +337,8 @@ export async function performUpdate(options: UpdateOptions = {}): Promise<void> 
     method = 'server',
     gitPath = process.cwd(),
     serverUrl,
+    gitRepoUrl,
+    clonePath = DEFAULT_CLONE_PATH,
     restartAfterUpdate = true,
     updateCommand,
   } = options;
@@ -267,6 +347,24 @@ export async function performUpdate(options: UpdateOptions = {}): Promise<void> 
     console.log('🚀 Starting worker update...');
     console.log(`Current version: ${getWorkerVersion()}`);
     console.log(`Update method: ${method}`);
+
+    if (method === 'repo') {
+      if (!gitRepoUrl) {
+        throw new Error('gitRepoUrl is required for repo update method');
+      }
+      await updateViaRepo(gitRepoUrl, clonePath);
+      if (options.onUpdateComplete) {
+        try {
+          await options.onUpdateComplete();
+        } catch (error) {
+          console.warn('⚠️ onUpdateComplete callback failed:', error);
+        }
+      }
+      if (restartAfterUpdate) {
+        restartProcessFromClone(clonePath);
+      }
+      return;
+    }
 
     if (method === 'git') {
       // Check if we're in a git repository

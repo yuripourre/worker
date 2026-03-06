@@ -3,6 +3,7 @@
 import { Worker } from './worker';
 import type { DeviceSpec, ResourceUsage, Job, JobContext } from './types';
 import type { ArtifactMetadata } from './shared';
+import type { WorkerUpdateJobContext } from './shared';
 import { isLLMJobContext, isWorkerUpdateJobContext, JobCategory, WORKER_CONFIG, EXTERNAL_SERVICES_CONFIG, DEVICE_CONFIG, COMFYUI_CATEGORY_TAG_PREFIXES, MODEL_TAG_PREFIX } from './shared';
 import { join } from 'path';
 import { SpecsAnalyzer } from './utils/specs-analyzer';
@@ -480,8 +481,7 @@ class ExecutorCLI {
         console.warn(`⚠️ Failed to mark update job as completed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
-      // Use worker's existing baseUrl to download update
-      await this.handleUpdate(this.client.getBaseUrl());
+      await this.handleUpdate(this.client.getBaseUrl(), job.context as WorkerUpdateJobContext);
       return; // handleUpdate restarts the process
     }
 
@@ -592,7 +592,7 @@ class ExecutorCLI {
    * Convert server Job to ExecutableJob. Category is set by the server; no inference.
    */
   private convertJobToExecutableJob(job: Job): ExecutableJob {
-    const category = job.category ?? (job.context && 'category' in job.context ? (job.context as { category: JobCategory }).category : undefined);
+    const category = job.category ?? (job.context && 'category' in job.context ? (job.context as { category: string }).category : undefined);
     if (category == null) {
       throw new Error('Job category is required (server must set category on every job)');
     }
@@ -600,7 +600,7 @@ class ExecutorCLI {
       id: job.id,
       context: job.context,
       status: 'pending',
-      category,
+      category: category as ExecutableJob['category'],
     };
   }
 
@@ -608,7 +608,7 @@ class ExecutorCLI {
   /**
    * Handle worker update
    */
-  private async handleUpdate(baseUrl?: string): Promise<void> {
+  private async handleUpdate(baseUrl?: string, jobContext?: WorkerUpdateJobContext): Promise<void> {
     if (this.updateInProgress) {
       console.log('⏳ Update already in progress, skipping...');
       return;
@@ -625,12 +625,29 @@ class ExecutorCLI {
     console.log('🚀 Starting worker update process...');
 
     try {
-      // Determine update method from environment or use server as default
+      const serverUrl = baseUrl || this.options.baseUrl;
+      const onUpdateComplete = async () => {
+        (this.client as any).updateLastUpdateDate();
+      };
+
+      // If job context has repoUrl, use repo method (clone/pull and run from there)
+      if (jobContext?.repoUrl) {
+        const updateOptions: UpdateOptions = {
+          method: 'repo',
+          gitRepoUrl: jobContext.repoUrl,
+          clonePath: jobContext.clonePath,
+          restartAfterUpdate: true,
+          onUpdateComplete,
+        };
+        this.shuttingDown = true;
+        await performUpdate(updateOptions);
+        return;
+      }
+
+      // Otherwise use env-based method (server, git, or manual)
       const updateMethod = (process.env.WORKER_UPDATE_METHOD || 'server') as 'git' | 'server' | 'manual';
       const updateCommand = process.env.WORKER_UPDATE_COMMAND;
       const gitPath = process.env.WORKER_GIT_PATH || process.cwd();
-      // Use provided baseUrl or fall back to options.baseUrl
-      const serverUrl = baseUrl || this.options.baseUrl;
 
       const updateOptions: UpdateOptions = {
         method: updateMethod,
@@ -638,10 +655,7 @@ class ExecutorCLI {
         serverUrl,
         restartAfterUpdate: true,
         updateCommand,
-        onUpdateComplete: async () => {
-          // Update last update date after successful update
-          (this.client as any).updateLastUpdateDate();
-        },
+        onUpdateComplete,
       };
 
       // Signal the long-poll loop to stop

@@ -297,7 +297,7 @@ export class OllamaClient {
       const response = await fetch(`${this.baseUrl}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: modelName })
+        body: JSON.stringify({ model: modelName })
       });
 
       if (!response.ok) {

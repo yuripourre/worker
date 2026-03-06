@@ -391,10 +391,14 @@ export function isModelManagementJobContext(
 /**
  * Worker update job context
  * Used to trigger worker updates from the server
- * Worker will use its existing baseUrl to download the update package
+ * When repoUrl is set, worker clones/pulls that repo and restarts from it.
  */
 export interface WorkerUpdateJobContext extends BaseJobContext {
   category: (typeof JobCategoryConst)['WORKER_UPDATE'];
+  /** Git clone URL (e.g. https://github.com/yuripourre/worker.git). When set, worker uses repo update method. */
+  repoUrl?: string;
+  /** Target directory for clone; if omitted, worker uses a default path. */
+  clonePath?: string;
 }
 
 export function isWorkerUpdateJobContext(
