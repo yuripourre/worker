@@ -101,7 +101,11 @@ function createDynamicToolFromMcp(tool: McpTool, jobToken?: string): any {
 
   const executeUrl = tool._executeUrl;
   const toolName = tool.name;
-  const headers: Record<string, string> = jobToken ? { Authorization: `Bearer ${jobToken}` } : {};
+  const headers: Record<string, string> = { ...(jobToken ? { Authorization: `Bearer ${jobToken}` } : {}) };
+  const vercelBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+  if (vercelBypass) {
+    headers['x-vercel-protection-bypass'] = vercelBypass;
+  }
   if (!jobToken) {
     console.warn(`[MCP tool] ${toolName}: no jobToken — worker may have received job without toolCallToken; MCP execute may return 401`);
   }
