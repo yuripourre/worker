@@ -474,6 +474,8 @@ export interface Job {
   requiredTags?: string[];
   /** Short-lived token for MCP tool execution; set by server when returning job to worker. */
   toolCallToken?: string;
+  /** Vercel Protection Bypass secret for MCP requests; set by server when configured. */
+  vercelProtectionBypass?: string;
 }
 
 // ============================================================================
@@ -495,6 +497,8 @@ export interface ExecutableJob {
   category: JobCategoryType;
   /** Short-lived token for MCP tool execution; from job payload. */
   toolCallToken?: string;
+  /** Vercel Protection Bypass secret for MCP requests; from job payload. */
+  vercelProtectionBypass?: string;
 }
 
 /**

@@ -30,6 +30,7 @@ export class LLMCategoryExecutor implements CategoryExecutor {
       systemPrompt: ctx.systemPrompt,
       tools: ctx.tools,
       jobToken: job.toolCallToken,
+      vercelProtectionBypass: job.vercelProtectionBypass,
       image: ctx.image,
       numCtx: ctx.numCtx,
       numPredict: ctx.numPredict,

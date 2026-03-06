@@ -604,6 +604,7 @@ class ExecutorCLI {
       status: 'pending',
       category: category as ExecutableJob['category'],
       ...(job.toolCallToken && { toolCallToken: job.toolCallToken }),
+      ...(job.vercelProtectionBypass && { vercelProtectionBypass: job.vercelProtectionBypass }),
     };
   }
 

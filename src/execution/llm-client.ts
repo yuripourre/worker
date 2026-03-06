@@ -35,6 +35,8 @@ export interface LLMChatOptions {
   tools?: McpTool[];
   /** Job-scoped token for MCP tool execution (Authorization: Bearer). */
   jobToken?: string;
+  /** Vercel Protection Bypass secret (x-vercel-protection-bypass); from job payload when server sets it. */
+  vercelProtectionBypass?: string;
   image?: {
     fileName: string;
     mimeType: string;

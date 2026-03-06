@@ -87,8 +87,9 @@ function extractTextFromContent(content: McpContent[]): string {
  * The tool calls POST _executeUrl with { arguments: input } and parses
  * the MCP-standard { content, isError } response.
  * When jobToken is provided, sends Authorization: Bearer <jobToken>.
+ * When vercelProtectionBypass is provided (from job payload), sends x-vercel-protection-bypass so requests reach the API behind Vercel Deployment Protection.
  */
-function createDynamicToolFromMcp(tool: McpTool, jobToken?: string): any {
+function createDynamicToolFromMcp(tool: McpTool, jobToken?: string, vercelProtectionBypass?: string): any {
   if (!tool.name || typeof tool.name !== 'string') {
     throw new Error('McpTool is missing required field "name"');
   }
@@ -102,9 +103,8 @@ function createDynamicToolFromMcp(tool: McpTool, jobToken?: string): any {
   const executeUrl = tool._executeUrl;
   const toolName = tool.name;
   const headers: Record<string, string> = { ...(jobToken ? { Authorization: `Bearer ${jobToken}` } : {}) };
-  const vercelBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
-  if (vercelBypass) {
-    headers['x-vercel-protection-bypass'] = vercelBypass;
+  if (vercelProtectionBypass) {
+    headers['x-vercel-protection-bypass'] = vercelProtectionBypass;
   }
   if (!jobToken) {
     console.warn(`[MCP tool] ${toolName}: no jobToken — worker may have received job without toolCallToken; MCP execute may return 401`);
@@ -261,7 +261,7 @@ export class LangGraphLLMClient implements LLMClient {
     const toolErrors: string[] = [];
     for (const mcpTool of mcpTools) {
       try {
-        langchainTools.push(createDynamicToolFromMcp(mcpTool, options.jobToken));
+        langchainTools.push(createDynamicToolFromMcp(mcpTool, options.jobToken, options.vercelProtectionBypass));
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.error(`Failed to create tool ${mcpTool.name}:`, msg);
