@@ -7,6 +7,7 @@ import { OutputArtifactHelper } from '../output-artifact-helper';
 /**
  * LLM Category Executor
  * Handles LLM-based jobs by calling the LLM client directly.
+ * When tools are present, worker executes them locally as subprocesses.
  */
 export class LLMCategoryExecutor implements CategoryExecutor {
   constructor(private llmClient: LLMClient) {}
@@ -17,11 +18,7 @@ export class LLMCategoryExecutor implements CategoryExecutor {
     }
     const ctx = job.context;
     if (ctx.tools && ctx.tools.length > 0) {
-      console.log(`🔗 MCP tool execution URLs (${ctx.tools.length} tool(s)):`);
-      for (const t of ctx.tools) {
-        const url = t._executeUrl ?? '(missing _executeUrl)';
-        console.log(`   ${t.name}: ${url}`);
-      }
+      console.log(`🔗 Tools (${ctx.tools.length}): ${ctx.tools.map(t => t.name).join(', ')}`);
     }
     const options = {
       model: ctx.model,
@@ -29,8 +26,6 @@ export class LLMCategoryExecutor implements CategoryExecutor {
       prompt: ctx.userPrompt ?? '',
       systemPrompt: ctx.systemPrompt,
       tools: ctx.tools,
-      jobToken: job.toolCallToken,
-      vercelProtectionBypass: job.vercelProtectionBypass,
       image: ctx.image,
       numCtx: ctx.numCtx,
       numPredict: ctx.numPredict,

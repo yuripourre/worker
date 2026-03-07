@@ -53,6 +53,10 @@ export class Worker {
   private lastSentModelInventoryJson: string | undefined;
   private lastSentModelTagsJson: string | undefined;
 
+  // Tool inventory state — sent with every registerForJob heartbeat when changed
+  private currentToolInventory: import('./shared').WorkerToolInventory | undefined;
+  private lastSentToolInventoryJson: string | undefined;
+
   // Version tracking
   private readonly workerVersion: string;
   private updatePending: boolean = false;
@@ -396,7 +400,7 @@ export class Worker {
     return {
       deviceName: this.config.deviceName,
       comfyuiPath: this.config.comfyuiPath,
-      ollamaBaseUrl: this.config.ollamaBaseUrl
+      ollamaBaseUrl: this.config.ollamaBaseUrl,
     };
   }
 
@@ -465,6 +469,14 @@ export class Worker {
   }
 
   /**
+   * Update the in-memory tool inventory that is included in every heartbeat.
+   * Called from cli.ts on startup and after each WORKER_UPDATE tool install/remove.
+   */
+  setToolInventory(inventory: import('./shared').WorkerToolInventory | undefined): void {
+    this.currentToolInventory = inventory;
+  }
+
+  /**
    * Build payload (usage, capabilities, etc.) to send with registerForJob().
    */
   private async buildHeartbeatPayload(): Promise<{
@@ -478,6 +490,7 @@ export class Worker {
     version?: string;
     lastUpdateDate?: string;
     modelInventory?: import('./shared').ModelInventory;
+    toolInventory?: import('./shared').WorkerToolInventory;
     tags?: string[];
   }> {
     const resourceUsage = await this.getCurrentSystemResources();
@@ -494,10 +507,14 @@ export class Worker {
       this.currentModelInventory !== undefined ? JSON.stringify(this.currentModelInventory) : undefined;
     const currentTagsJson =
       this.currentModelTags.length > 0 ? JSON.stringify(this.currentModelTags) : undefined;
+    const currentToolInventoryJson =
+      this.currentToolInventory !== undefined ? JSON.stringify(this.currentToolInventory) : undefined;
     const includeModelInventory =
       currentInventoryJson !== undefined && currentInventoryJson !== this.lastSentModelInventoryJson;
     const includeTags =
       currentTagsJson !== undefined && currentTagsJson !== this.lastSentModelTagsJson;
+    const includeToolInventory =
+      currentToolInventoryJson !== undefined && currentToolInventoryJson !== this.lastSentToolInventoryJson;
     return {
       ...resourceUsage,
       temperature: resourceUsageWithTemp.temperature,
@@ -508,6 +525,7 @@ export class Worker {
       lastUpdateDate,
       ...(includeModelInventory && this.currentModelInventory !== undefined && { modelInventory: this.currentModelInventory }),
       ...(includeTags && this.currentModelTags.length > 0 && { tags: this.currentModelTags }),
+      ...(includeToolInventory && this.currentToolInventory !== undefined && { toolInventory: this.currentToolInventory }),
     };
   }
 
@@ -544,6 +562,9 @@ export class Worker {
       }
       if (heartbeatData.tags !== undefined) {
         this.lastSentModelTagsJson = JSON.stringify(this.currentModelTags);
+      }
+      if (heartbeatData.toolInventory !== undefined) {
+        this.lastSentToolInventoryJson = JSON.stringify(this.currentToolInventory);
       }
     }
     if (response.status === 204) return null;

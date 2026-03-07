@@ -1,4 +1,4 @@
-import { ExecutableJob, ExecutableJobResult, JobCategory } from '../types';
+import { ExecutableJob, ExecutableJobResult, JobCategory, type JobCategoryType } from '../types';
 import { LLMClient } from '../llm-client';
 import { CategoryExecutor } from './category/category-executor';
 import { LLMCategoryExecutor } from './category/llm-category-executor';
@@ -11,7 +11,7 @@ import { InformationRequestCategoryExecutor } from './category/information-reque
 import { ModelManagementCategoryExecutor } from './category/model-management-category-executor';
 
 export class Executor {
-  private categoryExecutors: Map<JobCategory, CategoryExecutor>;
+  private categoryExecutors: Map<JobCategoryType, CategoryExecutor>;
   private llmClient: LLMClient;
   private baseUrl?: string;
   private deviceId?: string;

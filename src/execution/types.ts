@@ -4,6 +4,7 @@
  */
 export { JobCategory } from '../shared';
 export type {
+  JobCategoryType,
   ExecutableJob,
   StatusOutput,
   ExecutableJobResult,

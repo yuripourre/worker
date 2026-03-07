@@ -20,7 +20,7 @@ interface CLIOptions {
   ollamaBaseUrl?: string;
   ollamaModel?: string;
   ollamaTemperature?: number;
-  comfyuiBaseUrl?: string; // ComfyUI base URL
+  comfyuiBaseUrl?: string;
   singleRun?: boolean; // Run once and exit after job completion
   idle?: boolean; // Start in idle mode - register but don't process jobs
 }
@@ -263,6 +263,10 @@ class ExecutorCLI {
       this.lastModelInventoryJson = ExecutorCLI.inventoryForComparison(modelInventory) ?? 'null';
       this.client.setModelInventory(modelInventory, modelTags);
 
+      const { collectToolInventory } = await import('./utils/tool-inventory-collector');
+      const toolInventory = collectToolInventory();
+      this.client.setToolInventory(toolInventory);
+
       const savedDeviceId = (this.client as any).config?.deviceId;
       const device = await this.client.registerDevice({
         ...(savedDeviceId && { deviceId: savedDeviceId }),
@@ -278,6 +282,7 @@ class ExecutorCLI {
         capabilities: [...capabilityStatus.available, ...capabilityStatus.unavailable],
         modelInventory,
         ...(modelTags.length > 0 && { tags: modelTags }),
+        ...(toolInventory.tools && toolInventory.tools.length > 0 && { toolInventory }),
       });
 
       this.deviceId = device.id;
@@ -404,9 +409,15 @@ class ExecutorCLI {
       }
 
       this.client.setModelInventory(newInventory, newTags);
+
+      const { collectToolInventory } = await import('./utils/tool-inventory-collector');
+      const toolInventory = collectToolInventory();
+      this.client.setToolInventory(toolInventory);
+
       await this.client.updateDevice(this.deviceId, {
         tags: newTags,
         modelInventory: newInventory,
+        ...(toolInventory.tools && toolInventory.tools.length > 0 && { toolInventory }),
       });
       this.lastModelInventoryJson = newJson;
       console.log(
@@ -610,6 +621,95 @@ class ExecutorCLI {
 
 
   /**
+   * Install or remove a tool based on the job context, then refresh the tool inventory.
+   */
+  private async handleToolUpdate(baseUrl: string, jobContext: WorkerUpdateJobContext): Promise<void> {
+    const { toolInstall, toolRemove } = jobContext;
+    const { mkdirSync, rmSync, writeFileSync, chmodSync } = await import('fs');
+    const { join } = await import('path');
+
+    const INSTALL_COMMAND_TIMEOUT_MS = 300_000; // 5 minutes
+
+    if (toolInstall) {
+      const { toolId, toolName, fileName, entryPoint, installCommand } = toolInstall;
+      const toolDir = join('./tools', toolName);
+      console.log(`📦 Installing tool "${toolName}" from ${baseUrl}/api/tools/${toolId}/file`);
+      const response = await fetch(`${baseUrl}/api/tools/${toolId}/file`);
+      if (!response.ok) {
+        throw new Error(`Failed to download tool file: HTTP ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      mkdirSync(toolDir, { recursive: true });
+
+      if (fileName.endsWith('.zip')) {
+        const { unzipSync } = await import('fflate');
+        const unzipped = unzipSync(new Uint8Array(buffer));
+        for (const [relativePath, fileData] of Object.entries(unzipped)) {
+          const destPath = join(toolDir, relativePath);
+          const parentDir = destPath.substring(0, destPath.lastIndexOf('/'));
+          if (parentDir) mkdirSync(parentDir, { recursive: true });
+          writeFileSync(destPath, fileData);
+        }
+        // chmod +x the entry point if known
+        if (entryPoint) {
+          const ep = join(toolDir, entryPoint);
+          try { chmodSync(ep, 0o755); } catch { /* ignore */ }
+        }
+        console.log(`✅ Tool "${toolName}" installed (unzipped) to ${toolDir}`);
+      } else {
+        const dest = join(toolDir, fileName);
+        writeFileSync(dest, buffer);
+        // chmod +x for non-TypeScript files
+        if (!fileName.endsWith('.ts')) {
+          try { chmodSync(dest, 0o755); } catch { /* ignore */ }
+        }
+        console.log(`✅ Tool "${toolName}" installed to ${dest}`);
+      }
+
+      if (installCommand && installCommand.trim()) {
+        console.log(`🔧 Running install command for "${toolName}": ${installCommand}`);
+        const { spawn } = await import('child_process');
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(installCommand.trim(), [], {
+            shell: true,
+            cwd: toolDir,
+            stdio: 'inherit',
+          });
+          const timer = setTimeout(() => {
+            child.kill('SIGKILL');
+            reject(new Error(`Install command timed out after ${INSTALL_COMMAND_TIMEOUT_MS / 1000}s`));
+          }, INSTALL_COMMAND_TIMEOUT_MS);
+          child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0) {
+              console.log(`✅ Install command for "${toolName}" completed`);
+              resolve();
+            } else {
+              reject(new Error(`Install command exited with code ${code}`));
+            }
+          });
+          child.on('error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+          });
+        });
+      }
+    }
+
+    if (toolRemove) {
+      const toolDir = join('./tools', toolRemove.toolName);
+      rmSync(toolDir, { recursive: true, force: true });
+      console.log(`🗑️  Tool "${toolRemove.toolName}" removed`);
+    }
+
+    // Refresh tool inventory after install/remove
+    const { collectToolInventory } = await import('./utils/tool-inventory-collector');
+    const toolInventory = collectToolInventory();
+    this.client.setToolInventory(toolInventory);
+  }
+
+  /**
    * Handle worker update
    */
   private async handleUpdate(baseUrl?: string, jobContext?: WorkerUpdateJobContext): Promise<void> {
@@ -633,6 +733,13 @@ class ExecutorCLI {
       const onUpdateComplete = async () => {
         (this.client as any).updateLastUpdateDate();
       };
+
+      // Tool install/remove — handle without restarting
+      if (jobContext?.toolInstall || jobContext?.toolRemove) {
+        await this.handleToolUpdate(serverUrl, jobContext);
+        this.updateInProgress = false;
+        return;
+      }
 
       // If job context has repoUrl, use repo method (clone/pull and run from there)
       if (jobContext?.repoUrl) {
@@ -702,7 +809,7 @@ function parseArgs(): CLIOptions {
   const options: CLIOptions = {
     baseUrl: 'http://localhost:51111',
     ollamaBaseUrl: EXTERNAL_SERVICES_CONFIG.DEFAULT_OLLAMA_BASE_URL,
-    ollamaModel: 'qwen3:1.7b',
+    ollamaModel: 'qwen3.5:2b',
     ollamaTemperature: 0.7,
   };
 

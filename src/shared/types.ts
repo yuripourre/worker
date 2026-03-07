@@ -37,6 +37,35 @@ export interface DeviceSpec {
 }
 
 /**
+ * A tool installed on workers
+ */
+export interface WorkerTool {
+  id: string;
+  name: string;
+  description: string;
+  parameters: Array<{
+    name: string;
+    type: 'string' | 'number' | 'boolean';
+    description: string;
+    required: boolean;
+    enum?: string[];
+  }>;
+  type: 'bash' | 'typescript' | 'binary' | 'zip';
+  fileName: string;
+  entryPoint?: string;
+  version?: string;
+  createdAt: string;
+}
+
+/**
+ * Tool inventory reported by a worker in its heartbeat
+ */
+export interface WorkerToolInventory {
+  lastUpdated?: string;
+  tools?: Array<{ name: string; version?: string; type: string }>;
+}
+
+/**
  * Model inventory for a device
  */
 export interface ModelInventory {
@@ -77,6 +106,7 @@ export interface Device {
   capabilities?: Capability[];
   ipAddress?: string;
   modelInventory?: ModelInventory;
+  toolInventory?: WorkerToolInventory;
   /** Tags for capability routing (e.g. 'gpu-4090', 'ollama'); job requiredTags must be subset to claim */
   tags?: string[];
 }
@@ -97,6 +127,7 @@ export interface ResourceUsage {
 import { JobCategory as JobCategoryConst, type JobCategoryType } from './job-category.js';
 
 export const JobCategory = JobCategoryConst;
+export type { JobCategoryType };
 
 /**
  * Base job context with common fields
@@ -158,6 +189,23 @@ export interface McpToolResult {
   isError: boolean;
 }
 
+/** Tool definition for LLM jobs; worker executes the named tool locally as a subprocess. */
+export interface LLMToolDefinition {
+  name: string;
+  description: string;
+  parameters: Array<{
+    name: string;
+    type: 'string' | 'number' | 'boolean';
+    description: string;
+    required: boolean;
+    enum?: string[];
+  }>;
+  /** Execution type determines the runtime used by the worker. */
+  type: 'bash' | 'typescript' | 'binary' | 'zip';
+  /** For zip tools: relative path to the entry point inside the unpacked directory (e.g. "main.sh"). */
+  entryPoint?: string;
+}
+
 /**
  * LLM-specific job context
  */
@@ -168,8 +216,8 @@ export interface LLMJobContext extends BaseJobContext {
   outputType?: OutputType;
   systemPrompt?: string;
   userPrompt?: string;
-  /** MCP tools to make available to the LLM during this job */
-  tools?: McpTool[];
+  /** Tool definitions to make available to the LLM (worker calls tool endpoints on middleware API) */
+  tools?: LLMToolDefinition[];
   image?: {
     fileName: string;
     mimeType: string;
@@ -189,6 +237,8 @@ export interface LLMJobContext extends BaseJobContext {
   repeatPenalty?: number;
   /** Seed for reproducible outputs */
   seed?: number;
+  /** Ollama structured output. Pass "json" to force valid JSON, or a JSON Schema object to enforce its shape. */
+  format?: 'json' | Record<string, unknown>;
 }
 
 /**
@@ -399,6 +449,18 @@ export interface WorkerUpdateJobContext extends BaseJobContext {
   repoUrl?: string;
   /** Target directory for clone; if omitted, worker uses a default path. */
   clonePath?: string;
+  /** Install a specific tool on this worker; worker downloads the file from the server and unpacks/installs it. */
+  toolInstall?: {
+    toolId: string;
+    toolName: string;
+    type: 'bash' | 'typescript' | 'binary' | 'zip';
+    fileName: string;
+    entryPoint?: string;
+    /** Optional command to run after extracting (e.g. "npm install", "./install.sh"). Runs with cwd = tool directory. */
+    installCommand?: string;
+  };
+  /** Remove a previously installed tool from this worker. */
+  toolRemove?: { toolName: string };
 }
 
 export function isWorkerUpdateJobContext(
@@ -514,9 +576,8 @@ export interface LLMDebugInfo {
   }>;
   availableTools?: Array<{
     name: string;
-    description: string;
-    endpoint: string;
-    method: string;
+    description?: string;
+    type?: string;
   }>;
   messages?: Array<{
     role: 'system' | 'user' | 'assistant' | 'tool';
@@ -594,6 +655,7 @@ export interface RegisterDeviceRequest {
   specs: DeviceSpec;
   capabilities?: Capability[];
   modelInventory?: ModelInventory;
+  toolInventory?: WorkerToolInventory;
 }
 
 /** Job priority for queue ordering (higher = served first) */

@@ -1,4 +1,4 @@
-import type { McpTool } from '../shared';
+import type { LLMToolDefinition } from '../shared';
 
 export interface LLMDebugInfo {
   systemPrompt?: string;
@@ -11,8 +11,8 @@ export interface LLMDebugInfo {
   availableTools?: Array<{
     name: string;
     description?: string;
-    serverId: string;
-    _executeUrl: string;
+    endpoint?: string;
+    method?: string;
   }>;
   messages?: Array<{
     role: 'system' | 'user' | 'assistant' | 'tool';
@@ -32,11 +32,7 @@ export interface LLMChatOptions {
   temperature: number;
   prompt: string;
   systemPrompt?: string;
-  tools?: McpTool[];
-  /** Job-scoped token for MCP tool execution (Authorization: Bearer). */
-  jobToken?: string;
-  /** Vercel Protection Bypass secret (x-vercel-protection-bypass); from job payload when server sets it. */
-  vercelProtectionBypass?: string;
+  tools?: LLMToolDefinition[];
   image?: {
     fileName: string;
     mimeType: string;

@@ -8,7 +8,8 @@ import { StateGraph, END, Annotation } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { z } from "zod";
 import axios from "axios";
-import type { McpTool, McpToolInputSchema, McpContent } from '../shared';
+import type { LLMToolDefinition } from '../shared';
+import { runLocalTool } from './local-tool-runner';
 
 const DEFAULT_MODEL = "qwen3:1.7b";
 const DEFAULT_TEMPERATURE = 0.7;
@@ -45,113 +46,54 @@ const StateAnnotation = Annotation.Root({
 });
 
 /**
- * Build a Zod schema from an MCP inputSchema (JSON Schema object).
- * Supports string, number, boolean, and enum fields.
+ * Build a Zod schema from LLMToolDefinition.parameters (name, type, required, enum).
  */
-function buildZodSchemaFromInputSchema(inputSchema: McpToolInputSchema): z.ZodObject<any> {
+function buildZodSchemaFromParameters(parameters: LLMToolDefinition['parameters']): z.ZodObject<any> {
   const schemaObj: Record<string, z.ZodTypeAny> = {};
-  const properties = inputSchema.properties ?? {};
-  const required = inputSchema.required ?? [];
-
-  for (const [paramName, paramDef] of Object.entries(properties)) {
+  for (const p of parameters) {
     let field: z.ZodTypeAny;
-    if (Array.isArray(paramDef.enum) && paramDef.enum.length > 0) {
-      field = z.enum(paramDef.enum as [string, ...string[]]);
-    } else if (paramDef.type === 'number' || paramDef.type === 'integer') {
+    if (Array.isArray(p.enum) && p.enum.length > 0) {
+      field = z.enum(p.enum as [string, ...string[]]);
+    } else if (p.type === 'number') {
       field = z.number();
-    } else if (paramDef.type === 'boolean') {
+    } else if (p.type === 'boolean') {
       field = z.boolean();
     } else {
       field = z.string();
     }
-    if (paramDef.description) {
-      field = field.describe(String(paramDef.description));
-    }
-    if (!required.includes(paramName)) {
-      field = field.optional();
-    }
-    schemaObj[paramName] = field;
+    if (p.description) field = field.describe(p.description);
+    if (!p.required) field = field.optional();
+    schemaObj[p.name] = field;
   }
   return z.object(schemaObj) as z.ZodObject<any>;
 }
 
-function extractTextFromContent(content: McpContent[]): string {
-  return content
-    .filter(c => c.type === 'text' && c.text != null)
-    .map(c => c.text as string)
-    .join('\n');
-}
-
 /**
- * Build a LangChain DynamicStructuredTool from an MCP tool definition.
- * The tool calls POST _executeUrl with { arguments: input } and parses
- * the MCP-standard { content, isError } response.
- * When jobToken is provided, sends Authorization: Bearer <jobToken>.
- * When vercelProtectionBypass is provided (from job payload), sends x-vercel-protection-bypass so requests reach the API behind Vercel Deployment Protection.
+ * Build a LangChain DynamicStructuredTool from an LLMToolDefinition.
+ * Executes the tool locally as a subprocess (stdin: JSON args, stdout: result).
  */
-function createDynamicToolFromMcp(tool: McpTool, jobToken?: string, vercelProtectionBypass?: string): any {
+function createDynamicToolFromDefinition(tool: LLMToolDefinition): any {
   if (!tool.name || typeof tool.name !== 'string') {
-    throw new Error('McpTool is missing required field "name"');
+    throw new Error('Tool is missing required field "name"');
   }
-  if (!tool._executeUrl || typeof tool._executeUrl !== 'string') {
-    throw new Error(`McpTool "${tool.name}" is missing required field "_executeUrl"`);
-  }
+  const parameters = tool.parameters ?? [];
 
   // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
-  const schema = buildZodSchemaFromInputSchema(tool.inputSchema ?? { type: 'object', properties: {}, required: [] });
-
-  const executeUrl = tool._executeUrl;
-  const toolName = tool.name;
-  const headers: Record<string, string> = { ...(jobToken ? { Authorization: `Bearer ${jobToken}` } : {}) };
-  if (vercelProtectionBypass) {
-    headers['x-vercel-protection-bypass'] = vercelProtectionBypass;
-  }
-  if (!jobToken) {
-    console.warn(`[MCP tool] ${toolName}: no jobToken — worker may have received job without toolCallToken; MCP execute may return 401`);
-  }
+  const schema = buildZodSchemaFromParameters(parameters);
 
   // @ts-ignore - Type instantiation is excessively deep (TypeScript limitation with complex generics)
   return new DynamicStructuredTool({
     name: tool.name,
-    description: tool.description ?? tool.title ?? tool.name,
+    description: tool.description ?? tool.name,
     schema,
     func: async (input: Record<string, unknown>) => {
       try {
-        const response = await axios.post<{ content?: McpContent[]; isError?: boolean; result?: unknown }>(
-          executeUrl,
-          { arguments: input },
-          { headers }
-        );
-        const data = response.data;
-        if (Array.isArray(data.content)) {
-          const text = extractTextFromContent(data.content);
-          if (data.isError) {
-            return `Error: ${text}`;
-          }
-          return text;
-        }
-        // Fallback for non-standard responses
-        return data.result !== undefined ? JSON.stringify(data.result) : '';
+        const result = await runLocalTool(tool.name, input, tool.entryPoint);
+        console.log(`[Tool] ${tool.name} succeeded: ${result.slice(0, 200)}`);
+        return result || '{}';
       } catch (error) {
-        if (axios.isAxiosError(error)) {
-          if (error.response) {
-            const status = error.response.status;
-            const statusText = error.response.statusText ?? '';
-            const bodySummary =
-              typeof error.response.data === 'string'
-                ? error.response.data.slice(0, 200)
-                : JSON.stringify(error.response.data ?? {}).slice(0, 200);
-            console.error(
-              `[MCP tool] ${toolName} failed: POST ${executeUrl} -> ${status} ${statusText}`
-            );
-            console.error(`[MCP tool] response: ${bodySummary}`);
-          } else {
-            console.error(`[MCP tool] ${toolName} failed: POST ${executeUrl} -> ${error.message}`);
-          }
-        } else {
-          const msg = error instanceof Error ? error.message : String(error);
-          console.error(`[MCP tool] ${toolName} failed: POST ${executeUrl} -> ${msg}`);
-        }
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[Tool] ${tool.name} failed: ${msg}`);
         throw error;
       }
     },
@@ -254,18 +196,18 @@ export class LangGraphLLMClient implements LLMClient {
   }
 
   private async chatWithTools(options: LLMChatOptions): Promise<LLMChatResponse> {
-    const mcpTools = options.tools!;
+    const tools = options.tools!;
 
-    // Build LangChain tools, skipping any that fail to construct
+    // Build LangChain tools from LLMToolDefinition, skipping any that fail to construct
     const langchainTools: any[] = [];
     const toolErrors: string[] = [];
-    for (const mcpTool of mcpTools) {
+    for (const tool of tools) {
       try {
-        langchainTools.push(createDynamicToolFromMcp(mcpTool, options.jobToken, options.vercelProtectionBypass));
+        langchainTools.push(createDynamicToolFromDefinition(tool));
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        console.error(`Failed to create tool ${mcpTool.name}:`, msg);
-        toolErrors.push(`${mcpTool.name}: ${msg}`);
+        console.error(`Failed to create tool ${tool.name}:`, msg);
+        toolErrors.push(`${tool.name}: ${msg}`);
       }
     }
 
@@ -378,11 +320,10 @@ export class LangGraphLLMClient implements LLMClient {
       model,
       temperature,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      availableTools: mcpTools.map(t => ({
+      availableTools: tools.map(t => ({
         name: t.name,
         description: t.description,
-        serverId: t.serverId,
-        _executeUrl: t._executeUrl,
+        type: t.type,
       })),
       messages: result.messages.map(msg => {
         if (msg instanceof SystemMessage) {
