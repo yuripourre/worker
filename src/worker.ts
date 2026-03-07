@@ -19,6 +19,7 @@ import { networkInterfaces } from 'os';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { LocalServer, LocalServerConfig } from './local-server';
 import { getWorkerVersion } from './utils/version-utils';
+import { collectToolInventory } from './utils/tool-inventory-collector';
 
 /**
  * Executor Client - A simple client for worker services that execute jobs
@@ -56,6 +57,12 @@ export class Worker {
   // Tool inventory state — sent with every registerForJob heartbeat when changed
   private currentToolInventory: import('./shared').WorkerToolInventory | undefined;
   private lastSentToolInventoryJson: string | undefined;
+
+  // Optional: called when building heartbeat to get fresh model inventory/tags (CLI sets this)
+  private getCurrentModelInventoryAndTags?: () => Promise<{
+    modelInventory?: import('./shared').ModelInventory;
+    tags?: string[];
+  }>;
 
   // Version tracking
   private readonly workerVersion: string;
@@ -471,9 +478,24 @@ export class Worker {
   /**
    * Update the in-memory tool inventory that is included in every heartbeat.
    * Called from cli.ts on startup and after each WORKER_UPDATE tool install/remove.
+   * Heartbeat also re-collects tools from disk when building payload, so this is for fallback/cache.
    */
   setToolInventory(inventory: import('./shared').WorkerToolInventory | undefined): void {
     this.currentToolInventory = inventory;
+  }
+
+  /**
+   * Set callback to get current model inventory and tags when building heartbeat.
+   * If set, we call it every time we build the payload and send only if changed.
+   * CLI sets this so we always check for changes in LLM/ComfyUI models.
+   */
+  setInventoryRefreshCallback(
+    getCurrentModelInventoryAndTags: () => Promise<{
+      modelInventory?: import('./shared').ModelInventory;
+      tags?: string[];
+    }>
+  ): void {
+    this.getCurrentModelInventoryAndTags = getCurrentModelInventoryAndTags;
   }
 
   /**
@@ -503,18 +525,32 @@ export class Worker {
       capabilities = await this.checkCapabilitiesStatus();
     }
     const lastUpdateDate = this.getLastUpdateDate();
+
+    // Always check current model inventory/tags (from callback if set, else in-memory)
+    let currentModelInventory = this.currentModelInventory;
+    let currentTags = this.currentModelTags;
+    if (this.getCurrentModelInventoryAndTags) {
+      try {
+        const fresh = await this.getCurrentModelInventoryAndTags();
+        if (fresh.modelInventory !== undefined) currentModelInventory = fresh.modelInventory;
+        if (fresh.tags !== undefined) currentTags = fresh.tags;
+      } catch {
+        // Keep existing in-memory values on error
+      }
+    }
     const currentInventoryJson =
-      this.currentModelInventory !== undefined ? JSON.stringify(this.currentModelInventory) : undefined;
-    const currentTagsJson =
-      this.currentModelTags.length > 0 ? JSON.stringify(this.currentModelTags) : undefined;
-    const currentToolInventoryJson =
-      this.currentToolInventory !== undefined ? JSON.stringify(this.currentToolInventory) : undefined;
+      currentModelInventory !== undefined ? JSON.stringify(currentModelInventory) : undefined;
+    const currentTagsJson = currentTags.length > 0 ? JSON.stringify(currentTags) : undefined;
     const includeModelInventory =
       currentInventoryJson !== undefined && currentInventoryJson !== this.lastSentModelInventoryJson;
     const includeTags =
       currentTagsJson !== undefined && currentTagsJson !== this.lastSentModelTagsJson;
-    const includeToolInventory =
-      currentToolInventoryJson !== undefined && currentToolInventoryJson !== this.lastSentToolInventoryJson;
+
+    // Always check current tool inventory from disk; send only if changed
+    const freshToolInventory = collectToolInventory();
+    const currentToolInventoryJson = JSON.stringify(freshToolInventory);
+    const includeToolInventory = currentToolInventoryJson !== this.lastSentToolInventoryJson;
+
     return {
       ...resourceUsage,
       temperature: resourceUsageWithTemp.temperature,
@@ -523,9 +559,9 @@ export class Worker {
       capabilities,
       version: this.workerVersion,
       lastUpdateDate,
-      ...(includeModelInventory && this.currentModelInventory !== undefined && { modelInventory: this.currentModelInventory }),
-      ...(includeTags && this.currentModelTags.length > 0 && { tags: this.currentModelTags }),
-      ...(includeToolInventory && this.currentToolInventory !== undefined && { toolInventory: this.currentToolInventory }),
+      ...(includeModelInventory && currentModelInventory !== undefined && { modelInventory: currentModelInventory }),
+      ...(includeTags && currentTags.length > 0 && { tags: currentTags }),
+      ...(includeToolInventory && { toolInventory: freshToolInventory }),
     };
   }
 
@@ -558,13 +594,13 @@ export class Worker {
     });
     if (response.status === 204 || response.status === 200) {
       if (heartbeatData.modelInventory !== undefined) {
-        this.lastSentModelInventoryJson = JSON.stringify(this.currentModelInventory);
+        this.lastSentModelInventoryJson = JSON.stringify(heartbeatData.modelInventory);
       }
       if (heartbeatData.tags !== undefined) {
-        this.lastSentModelTagsJson = JSON.stringify(this.currentModelTags);
+        this.lastSentModelTagsJson = JSON.stringify(heartbeatData.tags);
       }
       if (heartbeatData.toolInventory !== undefined) {
-        this.lastSentToolInventoryJson = JSON.stringify(this.currentToolInventory);
+        this.lastSentToolInventoryJson = JSON.stringify(heartbeatData.toolInventory);
       }
     }
     if (response.status === 204) return null;

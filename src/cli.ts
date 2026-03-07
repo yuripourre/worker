@@ -313,6 +313,26 @@ class ExecutorCLI {
         await this.handleUpdate(this.client.getBaseUrl());
       });
 
+      // So we always check for changes in LLM/ComfyUI models and send only if changed
+      this.client.setInventoryRefreshCallback(async () => {
+        const { collectModelInventory } = await import('./utils/model-inventory-collector');
+        const modelInventory = await collectModelInventory(
+          this.options.ollamaBaseUrl,
+          (this.client as any).config?.comfyuiPath
+        );
+        const tags: string[] = [];
+        for (const m of modelInventory?.ollamaModels ?? []) {
+          tags.push(`${MODEL_TAG_PREFIX}${m.name}`);
+        }
+        for (const cat of modelInventory?.comfyuiModels ?? []) {
+          const prefix = COMFYUI_CATEGORY_TAG_PREFIXES[cat.name] ?? MODEL_TAG_PREFIX;
+          for (const f of cat.files ?? []) {
+            tags.push(`${prefix}${f.name}`);
+          }
+        }
+        return { modelInventory: modelInventory ?? undefined, tags };
+      });
+
     } catch (error) {
       console.error('❌ Failed to register device:', error);
       throw error;
