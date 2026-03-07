@@ -12,6 +12,7 @@ const TOOL_TIMEOUT_MS = 30_000;
 function resolveCommand(filePath: string): [string, ...string[]] {
   if (filePath.endsWith('.sh')) return ['bash', filePath];
   if (filePath.endsWith('.ts')) return ['bun', filePath];
+  if (filePath.endsWith('.js')) return ['bun', filePath];
   return [filePath];
 }
 
@@ -105,9 +106,9 @@ export async function runLocalTool(
       reject(new Error(`Failed to spawn tool "${toolName}": ${err.message}`));
     });
 
-    // Write args as JSON to stdin then close it
+    // Write args as JSON to stdin then close it (_tool for dispatch bundle routing)
     try {
-      child.stdin.write(JSON.stringify(args));
+      child.stdin.write(JSON.stringify({ _tool: toolName, ...args }));
       child.stdin.end();
     } catch (err) {
       clearTimeout(timer);
