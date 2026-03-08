@@ -730,6 +730,7 @@ export class Worker {
 
       // Upload artifacts (from file path or inlineData) and merge storage path/url into metadata
       let artifacts = result.artifacts ?? [];
+      this.log('info', `Artifacts to submit: ${artifacts.length}, first has inlineData: ${!!artifacts[0]?.inlineData}, first has filePath: ${!!artifacts[0]?.filePath}`);
       if (artifacts.length > 0) {
         const enriched: typeof artifacts = [];
         for (const artifact of artifacts) {
@@ -773,15 +774,14 @@ export class Worker {
         artifacts = enriched;
       }
 
-      // Omit inlineData from payload when we have R2 URL (avoid sending large base64)
-      const artifactsForAnswer = artifacts.map((a) =>
-        a.storageUrl && a.inlineData
-          ? (() => {
-              const { inlineData: _, ...rest } = a;
-              return rest;
-            })()
-          : a
-      );
+      // Always omit inlineData from the answer payload (Vercel 4.5 MB body limit; server does not need base64 here)
+      const artifactsForAnswer = artifacts.map((a) => {
+        if (a.inlineData) {
+          const { inlineData: _, ...rest } = a;
+          return rest;
+        }
+        return a;
+      });
 
       // Submit result (include appId so server updates the correct app's job)
       const body = { ...result, artifacts: artifactsForAnswer, ...(appId && { appId }) };

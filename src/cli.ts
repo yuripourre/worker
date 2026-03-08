@@ -536,6 +536,11 @@ class ExecutorCLI {
     }
 
     // --- Phase 2: Submit the result ---
+    const artifactCount = result.artifacts?.length ?? 0;
+    const firstHasInline = !!result.artifacts?.[0]?.inlineData;
+    if (artifactCount > 0) {
+      console.log(`   Artifacts: ${artifactCount}, first has inlineData: ${firstHasInline}`);
+    }
     const jobResult = {
       text: result.text,
       artifacts: result.artifacts,
@@ -596,15 +601,10 @@ class ExecutorCLI {
         throw new Error(`Job execution ${result.status}: ${result.answer}`);
       }
 
-      // Convert the result to the expected format (ensure ArtifactMetadata shape)
+      // Convert the result to the expected format (preserve inlineData so submitJobResult can upload to R2)
       const artifacts: ArtifactMetadata[] = (result.artifacts || []).map((a) => ({
-        fileName: a.fileName,
-        filePath: a.filePath,
+        ...a,
         workerId: a.workerId ?? 'unknown',
-        workerIp: a.workerIp,
-        fileSize: a.fileSize,
-        checksum: a.checksum,
-        mimeType: a.mimeType,
         createdAt: a.createdAt ?? new Date().toISOString(),
       }));
       return {
