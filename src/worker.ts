@@ -617,43 +617,49 @@ export class Worker {
   }
 
   /**
-   * Upload artifact file to server
+   * Upload artifact to server. Supports file path or in-memory inlineData (R2 flow).
+   * Returns response JSON so caller can merge storagePath/storageUrl into artifact.
    */
-  async uploadArtifact(jobId: string, filePath: string, fileName: string): Promise<void> {
+  async uploadArtifact(
+    jobId: string,
+    filePathOrBuffer: string | Buffer,
+    fileName: string,
+    mimeType?: string
+  ): Promise<{ storagePath?: string; storageUrl?: string }> {
     if (!this.config.deviceId) {
       throw new Error('Device not registered. Call registerDevice() first.');
     }
 
-    try {
-      this.log('info', `Uploading artifact for job ${jobId}: ${fileName}`);
+    this.log('info', `Uploading artifact for job ${jobId}: ${fileName}`);
 
-      // Read file
-      const file = Bun.file(filePath);
-      if (!await file.exists()) {
-        throw new Error(`File not found: ${filePath}`);
+    let blob: Blob;
+    const contentType = mimeType || 'application/octet-stream';
+    if (typeof filePathOrBuffer === 'string') {
+      const file = Bun.file(filePathOrBuffer);
+      if (!(await file.exists())) {
+        throw new Error(`File not found: ${filePathOrBuffer}`);
       }
-
-      // Create FormData
-      const formData = new FormData();
-      const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' });
-      formData.append('file', blob, fileName);
-
-      // Upload to server
-      const response = await this.fetch(`${this.config.baseUrl}/api/jobs/${encodeURIComponent(jobId)}/artifacts`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      this.log('info', `Artifact uploaded successfully: ${fileName}`);
-    } catch (error) {
-      this.log('error', `Failed to upload artifact ${fileName} for job ${jobId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      throw error;
+      blob = new Blob([await file.arrayBuffer()], { type: file.type || contentType });
+    } else {
+      blob = new Blob([filePathOrBuffer], { type: contentType });
     }
+
+    const formData = new FormData();
+    formData.append('file', blob, fileName);
+
+    const response = await this.fetch(`${this.config.baseUrl}/api/jobs/${encodeURIComponent(jobId)}/artifacts`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    this.log('info', `Artifact uploaded successfully: ${fileName}`);
+    const json = (await response.json()) as { storagePath?: string; storageUrl?: string };
+    return { storagePath: json.storagePath, storageUrl: json.storageUrl };
   }
 
   /**
@@ -718,22 +724,62 @@ export class Worker {
     try {
       this.log('info', `Submitting result for job: ${jobId}`);
 
-      // Upload artifacts if any
-      if (result.artifacts && result.artifacts.length > 0) {
-        for (const artifact of result.artifacts) {
-          // Upload the file if it exists locally
-          if (artifact.filePath) {
+      // Upload artifacts (from file path or inlineData) and merge storage path/url into metadata
+      let artifacts = result.artifacts ?? [];
+      if (artifacts.length > 0) {
+        const enriched: typeof artifacts = [];
+        for (const artifact of artifacts) {
+          if (artifact.inlineData) {
             try {
-              await this.uploadArtifact(jobId, artifact.filePath, artifact.fileName);
+              const buffer = Buffer.from(artifact.inlineData, 'base64');
+              const uploadResult = await this.uploadArtifact(
+                jobId,
+                buffer,
+                artifact.fileName,
+                artifact.mimeType ?? 'image/png'
+              );
+              enriched.push({
+                ...artifact,
+                storagePath: uploadResult.storagePath ?? artifact.storagePath,
+                storageUrl: uploadResult.storageUrl ?? artifact.storageUrl,
+                storageProvider: (uploadResult.storageUrl ? 'r2' : artifact.storageProvider) as 'r2' | undefined,
+              });
             } catch (error) {
               this.log('warn', `Failed to upload artifact ${artifact.fileName}, continuing: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              enriched.push(artifact);
             }
+          } else if (artifact.filePath) {
+            try {
+              const uploadResult = await this.uploadArtifact(jobId, artifact.filePath, artifact.fileName, artifact.mimeType);
+              enriched.push({
+                ...artifact,
+                storagePath: uploadResult.storagePath ?? artifact.storagePath,
+                storageUrl: uploadResult.storageUrl ?? artifact.storageUrl,
+                storageProvider: (uploadResult.storageUrl ? 'r2' : artifact.storageProvider) as 'r2' | undefined,
+              });
+            } catch (error) {
+              this.log('warn', `Failed to upload artifact ${artifact.fileName}, continuing: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              enriched.push(artifact);
+            }
+          } else {
+            enriched.push(artifact);
           }
         }
+        artifacts = enriched;
       }
 
+      // Omit inlineData from payload when we have R2 URL (avoid sending large base64)
+      const artifactsForAnswer = artifacts.map((a) =>
+        a.storageUrl && a.inlineData
+          ? (() => {
+              const { inlineData: _, ...rest } = a;
+              return rest;
+            })()
+          : a
+      );
+
       // Submit result (include appId so server updates the correct app's job)
-      const body = { ...result, ...(appId && { appId }) };
+      const body = { ...result, artifacts: artifactsForAnswer, ...(appId && { appId }) };
       await this.makeRequest(`/jobs/${encodeURIComponent(jobId)}/answer`, {
         method: 'POST',
         body: JSON.stringify(body)

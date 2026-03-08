@@ -82,6 +82,33 @@ export class OutputArtifactHelper {
   }
 
   /**
+   * Create an in-memory image artifact (no temp file); use with R2 upload flow.
+   * @param jobId The job ID (for fileName uniqueness)
+   * @param imageData Base64 encoded image data
+   * @param workerId The worker ID
+   * @param mimeType The MIME type of the image
+   * @returns Artifact metadata with inlineData, no filePath
+   */
+  static createImageArtifactInMemory(
+    jobId: string,
+    imageData: string,
+    workerId: string,
+    mimeType: string = 'image/png'
+  ): ArtifactMetadata {
+    const extension = mimeType.split('/')[1] || 'png';
+    const fileName = `output_${Date.now()}.${extension}`;
+    const buffer = Buffer.from(imageData, 'base64');
+    return {
+      fileName,
+      workerId,
+      fileSize: buffer.length,
+      mimeType,
+      createdAt: new Date().toISOString(),
+      inlineData: imageData,
+    };
+  }
+
+  /**
    * Extract image data from text output if present
    * Looks for base64 encoded images in the output
    * @param textOutput The text output to search

@@ -266,8 +266,8 @@ ${result.metadata ? `Metadata: ${JSON.stringify(result.metadata, null, 2)}` : ''
       // Convert to base64 for artifact creation
       const base64Image = buffer.toString('base64');
 
-      // Create artifact using helper
-      const artifact = await OutputArtifactHelper.createImageArtifact(
+      // Create in-memory artifact (no temp file); server uploads to R2
+      const artifact = OutputArtifactHelper.createImageArtifactInMemory(
         jobId,
         base64Image,
         this.workerId || 'unknown',
@@ -435,8 +435,8 @@ Generated Image Details:
         // Convert to base64 for artifact creation
         const base64Image = buffer.toString('base64');
 
-        // Create artifact using helper
-        const artifact = await OutputArtifactHelper.createImageArtifact(
+        // Create in-memory artifact (no temp file); server uploads to R2
+        const artifact = OutputArtifactHelper.createImageArtifactInMemory(
           jobId,
           base64Image,
           this.workerId || 'unknown',
@@ -484,7 +484,7 @@ Generated Image Details:
         // Create a simple placeholder image (1x1 transparent PNG)
         const placeholderImageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-        const artifact = await OutputArtifactHelper.createImageArtifact(
+        const artifact = OutputArtifactHelper.createImageArtifactInMemory(
           jobId,
           placeholderImageBase64,
           this.workerId || 'unknown',
