@@ -619,12 +619,14 @@ export class Worker {
   /**
    * Upload artifact to server. Supports file path or in-memory inlineData (R2 flow).
    * Returns response JSON so caller can merge storagePath/storageUrl into artifact.
+   * Pass appId when the job belongs to a specific app so the server can find the job and upload to R2 under that app.
    */
   async uploadArtifact(
     jobId: string,
     filePathOrBuffer: string | Buffer,
     fileName: string,
-    mimeType?: string
+    mimeType?: string,
+    appId?: string
   ): Promise<{ storagePath?: string; storageUrl?: string }> {
     if (!this.config.deviceId) {
       throw new Error('Device not registered. Call registerDevice() first.');
@@ -647,7 +649,9 @@ export class Worker {
     const formData = new FormData();
     formData.append('file', blob, fileName);
 
-    const response = await this.fetch(`${this.config.baseUrl}/api/jobs/${encodeURIComponent(jobId)}/artifacts`, {
+    const url = new URL(`${this.config.baseUrl}/api/jobs/${encodeURIComponent(jobId)}/artifacts`);
+    if (appId) url.searchParams.set('appId', appId);
+    const response = await this.fetch(url.toString(), {
       method: 'POST',
       body: formData,
     });
@@ -736,7 +740,8 @@ export class Worker {
                 jobId,
                 buffer,
                 artifact.fileName,
-                artifact.mimeType ?? 'image/png'
+                artifact.mimeType ?? 'image/png',
+                appId
               );
               enriched.push({
                 ...artifact,
@@ -750,7 +755,7 @@ export class Worker {
             }
           } else if (artifact.filePath) {
             try {
-              const uploadResult = await this.uploadArtifact(jobId, artifact.filePath, artifact.fileName, artifact.mimeType);
+              const uploadResult = await this.uploadArtifact(jobId, artifact.filePath, artifact.fileName, artifact.mimeType, appId);
               enriched.push({
                 ...artifact,
                 storagePath: uploadResult.storagePath ?? artifact.storagePath,
