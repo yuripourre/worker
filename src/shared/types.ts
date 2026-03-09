@@ -358,7 +358,10 @@ export type JobContext =
   | ImageJobContext
   | InformationRequestJobContext
   | ModelManagementJobContext
-  | WorkerUpdateJobContext;
+  | WorkerUpdateJobContext
+  | WorkerConfigJobContext
+  | FileFetchJobContext
+  | FileUploadJobContext;
 
 /**
  * Type guard functions for job contexts
@@ -408,7 +411,10 @@ export interface InformationRequestJobContext extends BaseJobContext {
     | 'comfyui_models'
     | 'all_models'
     | 'capabilities'
-    | 'system_info';
+    | 'system_info'
+    | 'filesystem';
+  /** Path for filesystem listing (used when informationType === 'filesystem') */
+  path?: string;
   updateInventory?: boolean; // Whether to update the device inventory on the server
 }
 
@@ -469,6 +475,58 @@ export function isWorkerUpdateJobContext(
   return context.category === JobCategoryConst.WORKER_UPDATE;
 }
 
+/**
+ * Worker config job context
+ * Used to read or update worker runtime configuration, or create folders
+ */
+export interface WorkerConfigJobContext extends BaseJobContext {
+  category: (typeof JobCategoryConst)['WORKER_CONFIG'];
+  operation: 'get' | 'set' | 'create-folder';
+  comfyuiPath?: string;
+  comfyuiBaseUrl?: string;
+  ollamaBaseUrl?: string;
+  folderName?: string;
+  parentPath?: string;
+}
+
+export function isWorkerConfigJobContext(
+  context: JobContext
+): context is WorkerConfigJobContext {
+  return context.category === JobCategoryConst.WORKER_CONFIG;
+}
+
+/**
+ * File fetch job context
+ * Worker downloads an artifact from storage to a local path
+ */
+export interface FileFetchJobContext extends BaseJobContext {
+  category: (typeof JobCategoryConst)['FILE_FETCH'];
+  artifactId: string;
+  artifactUrl: string;
+  destinationPath: string;
+}
+
+export function isFileFetchJobContext(
+  context: JobContext
+): context is FileFetchJobContext {
+  return context.category === JobCategoryConst.FILE_FETCH;
+}
+
+/**
+ * File upload job context
+ * Worker uploads a local file to artifact storage and returns the URL
+ */
+export interface FileUploadJobContext extends BaseJobContext {
+  category: (typeof JobCategoryConst)['FILE_UPLOAD'];
+  filePath: string;
+}
+
+export function isFileUploadJobContext(
+  context: JobContext
+): context is FileUploadJobContext {
+  return context.category === JobCategoryConst.FILE_UPLOAD;
+}
+
 // ============================================================================
 // Job Types
 // ============================================================================
@@ -494,13 +552,22 @@ export interface StatusOutput {
  */
 export interface ArtifactMetadata {
   fileName: string;
-  filePath: string; // Local path on worker where file was created
+  /** Local path on worker (omit when using inlineData / R2-only flow) */
+  filePath?: string;
   workerId: string;
   workerIp?: string;
   fileSize: number;
   checksum?: string; // SHA-256 checksum
   mimeType?: string;
   createdAt: string;
+  /** R2 (or other) storage path after server upload; for download */
+  storagePath?: string;
+  /** Public or signed URL for downloading from R2 */
+  storageUrl?: string;
+  /** Storage provider used (e.g. 'r2') */
+  storageProvider?: 'r2';
+  /** In-memory base64 content when not writing to temp folder (R2 flow) */
+  inlineData?: string;
 }
 
 /**
@@ -538,6 +605,8 @@ export interface Job {
   toolCallToken?: string;
   /** Vercel Protection Bypass secret for MCP requests; set by server when configured. */
   vercelProtectionBypass?: string;
+  /** When true, job was dispatched in-memory only and not persisted to the database. */
+  transient?: boolean;
 }
 
 // ============================================================================
@@ -597,7 +666,7 @@ export interface ExecutableJobResult {
   executionDetails?: Record<string, unknown>;
   artifacts?: Array<{
     fileName: string;
-    filePath: string;
+    filePath?: string;
     workerId?: string;
     workerIp?: string;
     fileSize: number;

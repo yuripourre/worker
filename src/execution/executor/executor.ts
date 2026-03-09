@@ -3,12 +3,14 @@ import { LLMClient } from '../llm-client';
 import { CategoryExecutor } from './category/category-executor';
 import { LLMCategoryExecutor } from './category/llm-category-executor';
 import { ScriptCategoryExecutor } from './category/script-category-executor';
-import { FileRequestCategoryExecutor } from './category/file-request-category-executor';
 import { ImageGenerationCategoryExecutor } from './category/image-generation-category-executor';
 import { HttpRequestCategoryExecutor } from './category/http-request-category-executor';
 import { ImageCategoryExecutor } from './category/image-category-executor';
 import { InformationRequestCategoryExecutor } from './category/information-request-category-executor';
 import { ModelManagementCategoryExecutor } from './category/model-management-category-executor';
+import { WorkerConfigCategoryExecutor } from './category/worker-config-category-executor';
+import { FileFetchCategoryExecutor } from './category/file-fetch-category-executor';
+import { FileUploadCategoryExecutor } from './category/file-upload-category-executor';
 
 export class Executor {
   private categoryExecutors: Map<JobCategoryType, CategoryExecutor>;
@@ -16,24 +18,27 @@ export class Executor {
   private baseUrl?: string;
   private deviceId?: string;
   private workerId?: string;
-  private existingLocalServer?: any;
   private ollamaBaseUrl?: string;
   private comfyuiPath?: string;
+  private getConfig?: () => { comfyuiPath?: string; comfyuiBaseUrl?: string; ollamaBaseUrl?: string };
+  private setConfig?: (updates: { comfyuiPath?: string; comfyuiBaseUrl?: string; ollamaBaseUrl?: string }) => void;
 
   constructor(
     llmClient: LLMClient,
     baseUrl?: string,
     deviceId?: string,
     workerId?: string,
-    existingLocalServer?: any, // LocalServer instance if available
+    getConfig?: () => { comfyuiPath?: string; comfyuiBaseUrl?: string; ollamaBaseUrl?: string },
     ollamaBaseUrl?: string,
-    comfyuiPath?: string
+    comfyuiPath?: string,
+    setConfig?: (updates: { comfyuiPath?: string; comfyuiBaseUrl?: string; ollamaBaseUrl?: string }) => void
   ) {
     this.llmClient = llmClient;
     this.baseUrl = baseUrl;
     this.deviceId = deviceId;
     this.workerId = workerId;
-    this.existingLocalServer = existingLocalServer;
+    this.getConfig = getConfig;
+    this.setConfig = setConfig;
     this.ollamaBaseUrl = ollamaBaseUrl;
     this.comfyuiPath = comfyuiPath;
     this.categoryExecutors = new Map();
@@ -42,15 +47,16 @@ export class Executor {
   }
 
   private initializeCategoryExecutors(): void {
-    // Initialize category executors
     this.categoryExecutors.set(JobCategory.LLM, new LLMCategoryExecutor(this.llmClient));
     this.categoryExecutors.set(JobCategory.SCRIPT, new ScriptCategoryExecutor(this.llmClient, this.baseUrl, this.deviceId, this.workerId));
-    this.categoryExecutors.set(JobCategory.FILE_REQUEST, new FileRequestCategoryExecutor(this.baseUrl, this.deviceId, this.workerId, this.existingLocalServer));
     this.categoryExecutors.set(JobCategory.IMAGE_GENERATION, new ImageGenerationCategoryExecutor(this.llmClient, this.baseUrl, this.deviceId, this.workerId));
     this.categoryExecutors.set(JobCategory.HTTP_REQUEST, new HttpRequestCategoryExecutor(this.baseUrl, this.deviceId, this.workerId));
     this.categoryExecutors.set(JobCategory.IMAGE, new ImageCategoryExecutor(this.baseUrl, this.deviceId, this.workerId));
     this.categoryExecutors.set(JobCategory.INFORMATION_REQUEST, new InformationRequestCategoryExecutor(this.baseUrl, this.deviceId, this.workerId, this.ollamaBaseUrl, this.comfyuiPath));
     this.categoryExecutors.set(JobCategory.MODEL_MANAGEMENT, new ModelManagementCategoryExecutor(this.baseUrl, this.deviceId, this.workerId, this.ollamaBaseUrl, this.comfyuiPath));
+    this.categoryExecutors.set(JobCategory.WORKER_CONFIG, new WorkerConfigCategoryExecutor(this.getConfig, this.setConfig));
+    this.categoryExecutors.set(JobCategory.FILE_FETCH, new FileFetchCategoryExecutor(this.baseUrl));
+    this.categoryExecutors.set(JobCategory.FILE_UPLOAD, new FileUploadCategoryExecutor(this.baseUrl, this.deviceId, this.workerId));
   }
 
   /**
@@ -58,7 +64,6 @@ export class Executor {
    */
   updateComfyUIPath(path: string): void {
     this.comfyuiPath = path;
-    // Recreate category executors that use comfyuiPath
     this.categoryExecutors.set(JobCategory.INFORMATION_REQUEST, new InformationRequestCategoryExecutor(this.baseUrl, this.deviceId, this.workerId, this.ollamaBaseUrl, this.comfyuiPath));
     this.categoryExecutors.set(JobCategory.MODEL_MANAGEMENT, new ModelManagementCategoryExecutor(this.baseUrl, this.deviceId, this.workerId, this.ollamaBaseUrl, this.comfyuiPath));
   }
@@ -68,7 +73,6 @@ export class Executor {
    */
   updateOllamaBaseUrl(url: string): void {
     this.ollamaBaseUrl = url;
-    // Recreate category executors that use ollamaBaseUrl
     this.categoryExecutors.set(JobCategory.INFORMATION_REQUEST, new InformationRequestCategoryExecutor(this.baseUrl, this.deviceId, this.workerId, this.ollamaBaseUrl, this.comfyuiPath));
     this.categoryExecutors.set(JobCategory.MODEL_MANAGEMENT, new ModelManagementCategoryExecutor(this.baseUrl, this.deviceId, this.workerId, this.ollamaBaseUrl, this.comfyuiPath));
   }

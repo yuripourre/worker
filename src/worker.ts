@@ -17,7 +17,6 @@ import { LLMClient } from './execution/llm-client';
 import { WORKER_CONFIG } from './config/constants';
 import { networkInterfaces } from 'os';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { LocalServer, LocalServerConfig } from './local-server';
 import { getWorkerVersion } from './utils/version-utils';
 import { collectToolInventory } from './utils/tool-inventory-collector';
 
@@ -36,7 +35,6 @@ export class Worker {
   private specsAnalyzer: SpecsAnalyzer;
   private resourceService: ResourceService;
   private executor?: Executor;
-  private localServer?: LocalServer;
 
   // Connection state tracking
   private isServerConnected: boolean = true;
@@ -134,51 +132,9 @@ export class Worker {
       this.config.ollamaBaseUrl = persistedConfig.ollamaBaseUrl;
     }
 
-    // LocalServer will be initialized later via initializeLocalServer() method
-
     // Auto-register if enabled
     if (this.options.autoRegister && !this.config.deviceId) {
       this.log('warn', 'Auto-register enabled but no deviceId provided. Please call registerDevice() first.');
-    }
-  }
-
-  /**
-   * Initialize the local server for file operations and terminal access
-   */
-  async initializeLocalServer(): Promise<void> {
-    try {
-      this.log('info', 'Initializing local server for file operations and terminal access');
-
-      const localServerConfig: LocalServerConfig = {
-        port: 51115, // Same port as WORKER_FILE_SERVER_PORT in frontend
-        uploadDir: './uploads',
-        comfyuiPath: this.config.comfyuiPath,
-        ollamaBaseUrl: this.config.ollamaBaseUrl,
-        // authToken is optional in LocalServerConfig
-      };
-
-      this.localServer = new LocalServer(localServerConfig);
-      this.log('debug', 'LocalServer instance created');
-
-      // Set up config update callback
-      this.localServer.setConfigUpdateCallback((config) => {
-        if (config.comfyuiPath) {
-          this.setComfyUIPath(config.comfyuiPath);
-        }
-        if (config.ollamaBaseUrl) {
-          this.setOllamaBaseUrl(config.ollamaBaseUrl);
-        }
-      });
-
-      // Start the local server
-      await this.localServer.start();
-      this.log('info', 'Local server started successfully on port 51115');
-
-      // Verify server is running
-      const isRunning = this.localServer.isServerRunning();
-      this.log('info', `Local server running status: ${isRunning}`);
-    } catch (error) {
-      this.log('error', `Failed to initialize local server: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -367,11 +323,6 @@ export class Worker {
     this.config.comfyuiPath = path;
     this.saveWorkerConfig({ comfyuiPath: path });
 
-    // Also update the LocalServer's config if it exists
-    if (this.localServer) {
-      (this.localServer as any).config.comfyuiPath = path;
-    }
-
     if (this.executor && typeof (this.executor as any).updateComfyUIPath === 'function') {
       (this.executor as any).updateComfyUIPath(path);
       this.log('debug', 'Updated ComfyUI path in executor');
@@ -386,11 +337,6 @@ export class Worker {
   setOllamaBaseUrl(url: string): void {
     this.config.ollamaBaseUrl = url;
     this.saveWorkerConfig({ ollamaBaseUrl: url });
-
-    // Also update the LocalServer's config if it exists
-    if (this.localServer) {
-      (this.localServer as any).config.ollamaBaseUrl = url;
-    }
 
     if (this.executor && typeof (this.executor as any).updateOllamaBaseUrl === 'function') {
       (this.executor as any).updateOllamaBaseUrl(url);
@@ -992,14 +938,24 @@ export class Worker {
    * Set up the executor (no engine; worker runs jobs directly via Executor).
    */
   setupExecutor(llmClient: LLMClient): void {
+    const getConfig = () => ({
+      comfyuiPath: this.config.comfyuiPath,
+      comfyuiBaseUrl: this.config.comfyuiBaseUrl,
+      ollamaBaseUrl: this.config.ollamaBaseUrl,
+    });
+    const setConfig = (updates: { comfyuiPath?: string; comfyuiBaseUrl?: string; ollamaBaseUrl?: string }) => {
+      if (updates.comfyuiPath !== undefined) this.setComfyUIPath(updates.comfyuiPath);
+      if (updates.ollamaBaseUrl !== undefined) this.setOllamaBaseUrl(updates.ollamaBaseUrl);
+    };
     this.executor = new Executor(
       llmClient,
       this.config.baseUrl,
       this.config.deviceId,
       this.workerId,
-      this.localServer,
+      getConfig,
       this.config.ollamaBaseUrl,
-      this.config.comfyuiPath
+      this.config.comfyuiPath,
+      setConfig
     );
     this.log('info', 'Executor initialized');
   }
@@ -1074,13 +1030,6 @@ export class Worker {
       }
       return { status: 'failed', answer: `Job execution failed: ${errorMessage}` };
     }
-  }
-
-  /**
-   * Get the local server instance
-   */
-  getLocalServer(): LocalServer | undefined {
-    return this.localServer;
   }
 
   getExecutionEngineLLMClient(): any {

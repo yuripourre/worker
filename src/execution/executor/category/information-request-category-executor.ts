@@ -54,6 +54,9 @@ export class InformationRequestCategoryExecutor implements CategoryExecutor {
         case 'system_info':
           informationData = await this.getSystemInfo();
           break;
+        case 'filesystem':
+          informationData = await this.listFilesystem(context.path);
+          break;
         default:
           throw new Error(`Unknown information type: ${context.informationType}`);
       }
@@ -195,6 +198,28 @@ export class InformationRequestCategoryExecutor implements CategoryExecutor {
         error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
+  }
+
+  /**
+   * List files in a directory
+   */
+  private async listFilesystem(requestedPath?: string): Promise<any> {
+    const { readdirSync, statSync } = await import('fs');
+    const { resolve, dirname, join } = await import('path');
+    const basePath = requestedPath?.trim() ? resolve(requestedPath) : resolve(process.cwd());
+    const entries = readdirSync(basePath, { withFileTypes: true });
+    const files = entries.map(e => {
+      const full = join(basePath, e.name);
+      const stats = statSync(full);
+      return {
+        name: e.name,
+        size: e.isDirectory() ? 0 : stats.size,
+        modified: stats.mtime,
+        isDirectory: e.isDirectory(),
+      };
+    });
+    const parent = dirname(basePath);
+    return { currentPath: basePath, parentPath: parent === basePath ? null : parent, files };
   }
 
   /**

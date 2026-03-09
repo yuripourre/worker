@@ -61,36 +61,6 @@ class ExecutorCLI {
    * Initialize the executor with async operations
    */
   async initialize(): Promise<void> {
-    // Initialize the worker's local server
-    console.log('🏗️ Initializing worker local server...');
-    await this.client.initializeLocalServer();
-
-    // Wait for the LocalServer to be ready
-    console.log('⏳ Waiting for local server to initialize...');
-    let retries = 0;
-    const maxRetries = 10;
-
-    while (retries < maxRetries) {
-      try {
-        // Try to connect to the local server health endpoint
-        const response = await fetch('http://localhost:51115/health');
-        if (response.ok) {
-          console.log('✅ Local server is ready and responding');
-          break;
-        }
-      } catch (error) {
-        // Server not ready yet
-      }
-
-      retries++;
-      console.log(`⏳ Waiting for local server (${retries}/${maxRetries})...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    if (retries >= maxRetries) {
-      console.warn('⚠️ Local server may not be ready, but continuing...');
-    }
-
     console.log('✅ Worker initialization completed');
     console.log('⚠️  Note: Executor will be initialized after device registration');
   }
