@@ -378,6 +378,62 @@ Generated Image Details:
         // Convert frontend format to API format
         const apiNodes = ComfyUIWorkflowParser.convertFrontendToAPI(parsedWorkflow);
 
+        // Inject prompts and seed from context into the workflow
+        let kSamplerNode = null;
+        for (const [nodeId, node] of Object.entries(apiNodes)) {
+          const nodeData = node as any;
+          if (nodeData.class_type === 'KSampler' || nodeData.class_type === 'KSamplerAdvanced') {
+            kSamplerNode = nodeData;
+            break;
+          }
+        }
+
+        if (kSamplerNode && kSamplerNode.inputs) {
+          // Inject seed
+          if (imageContext.seed !== undefined) {
+            if ('seed' in kSamplerNode.inputs) {
+              kSamplerNode.inputs.seed = imageContext.seed;
+            } else if ('noise_seed' in kSamplerNode.inputs) {
+              kSamplerNode.inputs.noise_seed = imageContext.seed;
+            }
+          }
+
+          // Inject prompts by tracing back from KSampler
+          const posInput = kSamplerNode.inputs.positive;
+          const negInput = kSamplerNode.inputs.negative;
+
+          if (imageContext.prompt && Array.isArray(posInput)) {
+            const posNodeId = posInput[0];
+            const posNode = apiNodes[posNodeId];
+            if (posNode && posNode.class_type === 'CLIPTextEncode' && posNode.inputs) {
+              posNode.inputs.text = imageContext.prompt;
+            }
+          }
+
+          if (imageContext.negativePrompt && Array.isArray(negInput)) {
+            const negNodeId = negInput[0];
+            const negNode = apiNodes[negNodeId];
+            if (negNode && negNode.class_type === 'CLIPTextEncode' && negNode.inputs) {
+              negNode.inputs.text = imageContext.negativePrompt;
+            }
+          }
+        } else {
+          // Fallback if no KSampler is found: just find CLIPTextEncode nodes
+          const clipNodes = [];
+          for (const [nodeId, node] of Object.entries(apiNodes)) {
+            const nodeData = node as any;
+            if (nodeData.class_type === 'CLIPTextEncode') {
+              clipNodes.push(nodeData);
+            }
+          }
+          if (clipNodes.length >= 1 && imageContext.prompt && clipNodes[0].inputs) {
+            clipNodes[0].inputs.text = imageContext.prompt;
+          }
+          if (clipNodes.length >= 2 && imageContext.negativePrompt && clipNodes[1].inputs) {
+            clipNodes[1].inputs.text = imageContext.negativePrompt;
+          }
+        }
+
         // Inject uploaded images into LoadImage nodes if available
         if (uploadedImages.length > 0) {
           let imageIndex = 0;
