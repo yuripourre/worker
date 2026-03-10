@@ -11,6 +11,66 @@ import axios from "axios";
 import type { LLMToolDefinition } from '../shared';
 import { runLocalTool } from './local-tool-runner';
 
+const HTTP_PROXY_PATH = '/api/tools/http-proxy';
+
+async function runHttpTool(
+  tool: LLMToolDefinition,
+  input: Record<string, unknown>,
+  serverBaseUrl?: string
+): Promise<string> {
+  const url = tool.url;
+  if (!url) {
+    throw new Error(`HTTP tool "${tool.name}" is missing url`);
+  }
+  const method = (tool.httpMethod ?? 'POST').toUpperCase();
+  const headers = tool.httpHeaders ?? {};
+
+  if (serverBaseUrl) {
+    const base = serverBaseUrl.replace(/\/$/, '');
+    const apiBase = base.endsWith('/api') ? base : `${base}/api`;
+    const proxyUrl = `${apiBase}${HTTP_PROXY_PATH}`;
+    const res = await axios.post<{ result: string; isError: boolean }>(proxyUrl, {
+      url,
+      method,
+      headers,
+      arguments: input,
+    });
+    const { result, isError } = res.data;
+    if (isError) {
+      throw new Error(result || 'HTTP tool request failed');
+    }
+    return result ?? '{}';
+  }
+
+  const isGet = method === 'GET';
+  const requestUrl =
+    isGet && Object.keys(input).length > 0
+      ? `${url}${url.includes('?') ? '&' : '?'}${new URLSearchParams(
+          Object.fromEntries(
+            Object.entries(input).map(([k, v]) => [
+              k,
+              typeof v === 'string' ? v : JSON.stringify(v),
+            ])
+          )
+        ).toString()}`
+      : url;
+  const axiosConfig: Parameters<typeof axios.request>[0] = {
+    url: requestUrl,
+    method: method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...headers },
+  };
+  if (!isGet && Object.keys(input).length > 0) {
+    axiosConfig.data = input;
+  }
+  const response = await axios.request({ ...axiosConfig, responseType: 'text' });
+  const text =
+    typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return text || '{}';
+}
+
 const DEFAULT_MODEL = "qwen3:1.7b";
 const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_MAX_TOKENS = 2048;
@@ -70,9 +130,12 @@ function buildZodSchemaFromParameters(parameters: LLMToolDefinition['parameters'
 
 /**
  * Build a LangChain DynamicStructuredTool from an LLMToolDefinition.
- * Executes the tool locally as a subprocess (stdin: JSON args, stdout: result).
+ * For type 'http', executes via server proxy or direct fetch; otherwise runs locally as subprocess.
  */
-function createDynamicToolFromDefinition(tool: LLMToolDefinition): any {
+function createDynamicToolFromDefinition(
+  tool: LLMToolDefinition,
+  serverBaseUrl?: string
+): any {
   if (!tool.name || typeof tool.name !== 'string') {
     throw new Error('Tool is missing required field "name"');
   }
@@ -88,6 +151,11 @@ function createDynamicToolFromDefinition(tool: LLMToolDefinition): any {
     schema,
     func: async (input: Record<string, unknown>) => {
       try {
+        if (tool.type === 'http') {
+          const result = await runHttpTool(tool, input, serverBaseUrl);
+          console.log(`[Tool] ${tool.name} succeeded: ${result.slice(0, 200)}`);
+          return result || '{}';
+        }
         const runOptions = tool._absolutePath ? { absolutePath: tool._absolutePath } : undefined;
         const result = await runLocalTool(tool.name, input, tool.entryPoint, runOptions);
         console.log(`[Tool] ${tool.name} succeeded: ${result.slice(0, 200)}`);
@@ -204,7 +272,7 @@ export class LangGraphLLMClient implements LLMClient {
     const toolErrors: string[] = [];
     for (const tool of tools) {
       try {
-        langchainTools.push(createDynamicToolFromDefinition(tool));
+        langchainTools.push(createDynamicToolFromDefinition(tool, this.config.serverBaseUrl));
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.error(`Failed to create tool ${tool.name}:`, msg);

@@ -58,4 +58,6 @@ export interface LLMConfig {
   defaultModel?: string;
   defaultTemperature?: number;
   defaultMaxTokens?: number;
+  /** Base URL of the job server (used to proxy HTTP tools via /api/tools/http-proxy). */
+  serverBaseUrl?: string;
 }

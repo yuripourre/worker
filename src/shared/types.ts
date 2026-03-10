@@ -201,11 +201,17 @@ export interface LLMToolDefinition {
     enum?: string[];
   }>;
   /** Execution type determines the runtime used by the worker. */
-  type: 'bash' | 'typescript' | 'binary' | 'zip';
+  type: 'bash' | 'typescript' | 'binary' | 'zip' | 'http';
   /** For zip tools: relative path to the entry point inside the unpacked directory (e.g. "main.sh"). */
   entryPoint?: string;
   /** When set, worker runs this absolute path as the tool script (built-in tools). */
   _absolutePath?: string;
+  /** For http tools: target endpoint URL. */
+  url?: string;
+  /** For http tools: HTTP method (default POST). */
+  httpMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /** For http tools: extra request headers. */
+  httpHeaders?: Record<string, string>;
 }
 
 /**

@@ -82,7 +82,8 @@ class ExecutorCLI {
         baseUrl: this.options.ollamaBaseUrl || EXTERNAL_SERVICES_CONFIG.DEFAULT_OLLAMA_BASE_URL,
         defaultModel: this.options.ollamaModel || 'qwen3:1.7b',
         defaultTemperature: this.options.ollamaTemperature || 0.7,
-        defaultMaxTokens: 2048
+        defaultMaxTokens: 2048,
+        serverBaseUrl: this.options.baseUrl,
       });
 
       this.client.setupExecutor(llmClient);
