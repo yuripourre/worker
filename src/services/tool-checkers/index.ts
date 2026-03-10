@@ -7,6 +7,7 @@
 import { registerOllamaChecker } from './ollama-checker';
 import { registerComfyUIChecker } from './comfyui-checker';
 import { registerInternetChecker } from './internet-checker';
+import { registerFfmpegChecker } from './ffmpeg-checker';
 
 /**
  * Register all available capability checkers
@@ -27,8 +28,8 @@ export function registerAllCapabilityCheckers(
   // Register Internet checker
   registerInternetChecker();
 
-  // Add more capability checkers here as needed
-  // registerCustomCapabilityChecker();
+  // Register FFMPEG checker
+  registerFfmpegChecker();
 }
 
 /**
@@ -51,6 +52,7 @@ export function registerCapabilityCheckers(options: {
 export { OllamaChecker } from './ollama-checker';
 export { ComfyUIChecker } from './comfyui-checker';
 export { InternetChecker } from './internet-checker';
+export { FfmpegChecker, registerFfmpegChecker } from './ffmpeg-checker';
 export { registerOllamaChecker } from './ollama-checker';
 export { registerComfyUIChecker } from './comfyui-checker';
 export { registerInternetChecker } from './internet-checker';

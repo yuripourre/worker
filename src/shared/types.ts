@@ -365,7 +365,8 @@ export type JobContext =
   | WorkerUpdateJobContext
   | WorkerConfigJobContext
   | FileFetchJobContext
-  | FileUploadJobContext;
+  | FileUploadJobContext
+  | FFMPEGJobContext;
 
 /**
  * Type guard functions for job contexts
@@ -529,6 +530,26 @@ export function isFileUploadJobContext(
   context: JobContext
 ): context is FileUploadJobContext {
   return context.category === JobCategoryConst.FILE_UPLOAD;
+}
+
+/**
+ * FFMPEG job context
+ * Runs ffmpeg with the given arguments on the worker
+ */
+export interface FFMPEGJobContext extends BaseJobContext {
+  category: (typeof JobCategoryConst)['FFMPEG'];
+  /** FFMPEG command-line arguments (e.g. ['-i', 'input.mp4', '-c', 'copy', 'output.mp4']) */
+  args: string[];
+  /** Timeout in seconds (optional) */
+  timeout?: number;
+  /** Working directory for ffmpeg (optional) */
+  workingDirectory?: string;
+}
+
+export function isFFMPEGJobContext(
+  context: JobContext
+): context is FFMPEGJobContext {
+  return context.category === JobCategoryConst.FFMPEG;
 }
 
 // ============================================================================

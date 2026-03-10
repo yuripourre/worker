@@ -11,6 +11,7 @@ import { ModelManagementCategoryExecutor } from './category/model-management-cat
 import { WorkerConfigCategoryExecutor } from './category/worker-config-category-executor';
 import { FileFetchCategoryExecutor } from './category/file-fetch-category-executor';
 import { FileUploadCategoryExecutor } from './category/file-upload-category-executor';
+import { FFMPEGCategoryExecutor } from './category/ffmpeg-category-executor';
 
 export class Executor {
   private categoryExecutors: Map<JobCategoryType, CategoryExecutor>;
@@ -57,6 +58,7 @@ export class Executor {
     this.categoryExecutors.set(JobCategory.WORKER_CONFIG, new WorkerConfigCategoryExecutor(this.getConfig, this.setConfig));
     this.categoryExecutors.set(JobCategory.FILE_FETCH, new FileFetchCategoryExecutor(this.baseUrl));
     this.categoryExecutors.set(JobCategory.FILE_UPLOAD, new FileUploadCategoryExecutor(this.baseUrl, this.deviceId, this.workerId));
+    this.categoryExecutors.set(JobCategory.FFMPEG, new FFMPEGCategoryExecutor());
   }
 
   /**
