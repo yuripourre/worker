@@ -47,6 +47,8 @@ function findEntryPoint(toolDir: string, entryPoint?: string): string | null {
 /** Options for runLocalTool (e.g. baseDir for tests). */
 export interface RunLocalToolOptions {
   baseDir?: string;
+  /** When set, use this path as the script to run (skips directory lookup). */
+  absolutePath?: string;
 }
 
 /**
@@ -61,15 +63,20 @@ export async function runLocalTool(
   entryPoint?: string,
   options?: RunLocalToolOptions
 ): Promise<string> {
-  const baseDir = options?.baseDir ?? TOOL_BASE_DIR;
-  const toolDir = join(baseDir, toolName);
-  if (!existsSync(toolDir)) {
-    throw new Error(`Tool "${toolName}" is not installed (directory not found: ${toolDir})`);
-  }
-
-  const entryFile = findEntryPoint(toolDir, entryPoint);
-  if (!entryFile) {
-    throw new Error(`Could not find entry point for tool "${toolName}" in ${toolDir}`);
+  let entryFile: string;
+  if (options?.absolutePath) {
+    entryFile = options.absolutePath;
+  } else {
+    const baseDir = options?.baseDir ?? TOOL_BASE_DIR;
+    const toolDir = join(baseDir, toolName);
+    if (!existsSync(toolDir)) {
+      throw new Error(`Tool "${toolName}" is not installed (directory not found: ${toolDir})`);
+    }
+    const found = findEntryPoint(toolDir, entryPoint);
+    if (!found) {
+      throw new Error(`Could not find entry point for tool "${toolName}" in ${toolDir}`);
+    }
+    entryFile = found;
   }
 
   const [cmd, ...cmdArgs] = resolveCommand(entryFile);

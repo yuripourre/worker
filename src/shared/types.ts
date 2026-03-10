@@ -204,6 +204,8 @@ export interface LLMToolDefinition {
   type: 'bash' | 'typescript' | 'binary' | 'zip';
   /** For zip tools: relative path to the entry point inside the unpacked directory (e.g. "main.sh"). */
   entryPoint?: string;
+  /** When set, worker runs this absolute path as the tool script (built-in tools). */
+  _absolutePath?: string;
 }
 
 /**
@@ -218,6 +220,8 @@ export interface LLMJobContext extends BaseJobContext {
   userPrompt?: string;
   /** Tool definitions to make available to the LLM (worker calls tool endpoints on middleware API) */
   tools?: LLMToolDefinition[];
+  /** Shared workspace ID for file tools; agents use workspaceId to list/read/write/edit/delete files in the same storage. */
+  workspaceId?: string;
   image?: {
     fileName: string;
     mimeType: string;

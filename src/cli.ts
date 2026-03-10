@@ -899,6 +899,7 @@ Examples:
 async function main(): Promise<void> {
   try {
     const options = parseArgs();
+    process.env.JOB_SERVER_URL = options.baseUrl;
     const cli = new ExecutorCLI(options);
     await cli.initialize();
     await cli.start();

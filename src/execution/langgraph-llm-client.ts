@@ -88,7 +88,8 @@ function createDynamicToolFromDefinition(tool: LLMToolDefinition): any {
     schema,
     func: async (input: Record<string, unknown>) => {
       try {
-        const result = await runLocalTool(tool.name, input, tool.entryPoint);
+        const runOptions = tool._absolutePath ? { absolutePath: tool._absolutePath } : undefined;
+        const result = await runLocalTool(tool.name, input, tool.entryPoint, runOptions);
         console.log(`[Tool] ${tool.name} succeeded: ${result.slice(0, 200)}`);
         return result || '{}';
       } catch (error) {
