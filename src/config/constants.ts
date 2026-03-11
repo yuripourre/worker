@@ -139,6 +139,22 @@ export const ENGINE_CONFIG = {
 } as const;
 
 // ============================================================================
+// ComfyUI Path Resolution (startup inference + env fallback)
+// ============================================================================
+
+/** Subdirectory that identifies a valid ComfyUI root */
+export const COMFYUI_MODELS_DIR = 'models';
+
+/** Path suffixes to try when inferring ComfyUI root (relative to cwd or homedir) */
+export const COMFYUI_PATH_RESOLUTION = {
+  MODELS_DIR: COMFYUI_MODELS_DIR,
+  /** Candidate dir names for inference (first match wins) */
+  CANDIDATE_SUFFIXES: ['ComfyUI', 'comfyui'] as const,
+  /** Max depth for directory search under base dirs (e.g. 3 finds .../git/ComfyUI) */
+  MAX_SEARCH_DEPTH: 3,
+} as const;
+
+// ============================================================================
 // Resource Monitoring Configuration
 // ============================================================================
 

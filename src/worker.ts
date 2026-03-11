@@ -19,6 +19,7 @@ import { networkInterfaces } from 'os';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { getWorkerVersion } from './utils/version-utils';
 import { collectToolInventory } from './utils/tool-inventory-collector';
+import { resolveComfyUIPath } from './utils/comfyui-path-resolver';
 
 /**
  * Executor Client - A simple client for worker services that execute jobs
@@ -130,6 +131,16 @@ export class Worker {
     }
     if (persistedConfig?.ollamaBaseUrl && !this.config.ollamaBaseUrl) {
       this.config.ollamaBaseUrl = persistedConfig.ollamaBaseUrl;
+    }
+
+    // Infer ComfyUI path at startup if not set (env or filesystem inference), then persist
+    if (!this.config.comfyuiPath) {
+      const resolved = resolveComfyUIPath();
+      if (resolved) {
+        this.config.comfyuiPath = resolved;
+        this.saveWorkerConfig({ comfyuiPath: resolved });
+        this.log('info', `ComfyUI path resolved at startup: ${resolved}`);
+      }
     }
 
     // Auto-register if enabled
