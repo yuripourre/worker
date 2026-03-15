@@ -10,6 +10,7 @@ import { z } from "zod";
 import axios from "axios";
 import type { LLMToolDefinition } from '../shared';
 import { runLocalTool } from './local-tool-runner';
+import { EXTERNAL_SERVICES_CONFIG } from '../shared';
 
 const HTTP_PROXY_PATH = '/api/tools/http-proxy';
 
@@ -75,6 +76,8 @@ const DEFAULT_MODEL = "qwen3:1.7b";
 const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_MAX_TOKENS = 2048;
 
+const defaultKeepAlive = EXTERNAL_SERVICES_CONFIG.OLLAMA_KEEP_ALIVE;
+
 function buildChatOllamaConfig(
   base: { model: string; baseUrl: string; temperature: number; numPredict: number },
   options: {
@@ -85,6 +88,7 @@ function buildChatOllamaConfig(
     repeatPenalty?: number;
     seed?: number;
     format?: 'json' | Record<string, unknown>;
+    keepAlive?: number | string;
   }
 ) {
   return {
@@ -96,6 +100,7 @@ function buildChatOllamaConfig(
     ...(options.repeatPenalty !== undefined && { repeatPenalty: options.repeatPenalty }),
     ...(options.seed !== undefined && { seed: options.seed }),
     ...(options.format !== undefined && { format: options.format }),
+    keepAlive: options.keepAlive ?? defaultKeepAlive,
   };
 }
 
@@ -180,6 +185,7 @@ export class LangGraphLLMClient implements LLMClient {
       baseUrl: config.baseUrl || "http://localhost:11434",
       temperature: config.defaultTemperature || DEFAULT_TEMPERATURE,
       numPredict: config.defaultMaxTokens || DEFAULT_MAX_TOKENS,
+      keepAlive: config.keepAlive ?? defaultKeepAlive,
     });
   }
 
@@ -229,6 +235,7 @@ export class LangGraphLLMClient implements LLMClient {
           repeatPenalty: options.repeatPenalty,
           seed: options.seed,
           format: options.format,
+          keepAlive: this.config.keepAlive ?? defaultKeepAlive,
         }
       )
     );
@@ -304,6 +311,7 @@ export class LangGraphLLMClient implements LLMClient {
           repeatPenalty: options.repeatPenalty,
           seed: options.seed,
           format: options.format,
+          keepAlive: this.config.keepAlive ?? defaultKeepAlive,
         }
       )
     );
@@ -420,6 +428,7 @@ export class LangGraphLLMClient implements LLMClient {
       baseUrl: this.config.baseUrl || "http://localhost:11434",
       temperature: this.config.defaultTemperature || DEFAULT_TEMPERATURE,
       numPredict: this.config.defaultMaxTokens,
+      keepAlive: this.config.keepAlive ?? defaultKeepAlive,
     });
   }
 

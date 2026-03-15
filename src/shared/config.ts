@@ -26,6 +26,8 @@ export const SERVER_CONFIG = {
 export const EXTERNAL_SERVICES_CONFIG = {
   DEFAULT_OLLAMA_BASE_URL: 'http://localhost:11434',
   DEFAULT_COMFYUI_BASE_URL: 'http://localhost:8188',
+  /** Seconds to keep Ollama model loaded after a request (e.g. 300); use -1 for indefinite. Override via env OLLAMA_KEEP_ALIVE. */
+  OLLAMA_KEEP_ALIVE: 300,
 } as const;
 
 // ============================================================================

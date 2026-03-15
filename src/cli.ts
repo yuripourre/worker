@@ -20,6 +20,8 @@ interface CLIOptions {
   ollamaBaseUrl?: string;
   ollamaModel?: string;
   ollamaTemperature?: number;
+  /** Keep Ollama model loaded: seconds, duration (e.g. "5m"), or -1 for indefinite. */
+  ollamaKeepAlive?: number | string;
   comfyuiBaseUrl?: string;
   singleRun?: boolean; // Run once and exit after job completion
   idle?: boolean; // Start in idle mode - register but don't process jobs
@@ -84,6 +86,7 @@ class ExecutorCLI {
         defaultTemperature: this.options.ollamaTemperature || 0.7,
         defaultMaxTokens: 2048,
         serverBaseUrl: this.options.baseUrl,
+        keepAlive: this.options.ollamaKeepAlive ?? EXTERNAL_SERVICES_CONFIG.OLLAMA_KEEP_ALIVE,
       });
 
       this.client.setupExecutor(llmClient);
@@ -831,6 +834,14 @@ function parseArgs(): CLIOptions {
       case '-o':
         options.ollamaBaseUrl = args[++i];
         break;
+      case '--ollama-keep-alive':
+      case '-k':
+        options.ollamaKeepAlive = (() => {
+          const v = args[++i];
+          const n = Number(v);
+          return Number.isNaN(n) ? v : n;
+        })();
+        break;
       case '--ollama-model':
       case '-m':
         options.ollamaModel = args[++i];
@@ -877,6 +888,7 @@ Options:
   -n, --device-name <name>    Custom device name
   -l, --log-level <level>     Log level: none, error, warn, info, debug
   -o, --ollama-url <url>      Ollama base URL (default: http://localhost:11434)
+  -k, --ollama-keep-alive <v> Keep Ollama model loaded (e.g. 300, 5m, -1 for indefinite)
   -m, --ollama-model <model>  Ollama model to use (default: qwen3:1.7b)
   -t, --ollama-temperature <n> Ollama temperature setting (default: 0.7)
   -c, --comfyui-url <url>     ComfyUI base URL (default: http://localhost:8188)

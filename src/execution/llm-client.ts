@@ -60,4 +60,6 @@ export interface LLMConfig {
   defaultMaxTokens?: number;
   /** Base URL of the job server (used to proxy HTTP tools via /api/tools/http-proxy). */
   serverBaseUrl?: string;
+  /** Keep Ollama model loaded after request: seconds, duration string (e.g. "5m"), or -1 for indefinite. */
+  keepAlive?: number | string;
 }

@@ -93,17 +93,21 @@ export class OllamaClient {
   private defaultModel: string;
   private defaultTemperature: number;
   private defaultMaxTokens: number;
+  private keepAlive: number | string;
 
   constructor(config: {
     baseUrl?: string;
     defaultModel?: string;
     defaultTemperature?: number;
     defaultMaxTokens?: number;
+    /** Keep model loaded after request: seconds, duration string (e.g. "5m"), or -1 for indefinite. */
+    keepAlive?: number | string;
   } = {}) {
     this.baseUrl = config.baseUrl || EXTERNAL_SERVICES_CONFIG.DEFAULT_OLLAMA_BASE_URL;
     this.defaultModel = config.defaultModel || 'llama2';
     this.defaultTemperature = config.defaultTemperature || 0.7;
     this.defaultMaxTokens = config.defaultMaxTokens || 2048;
+    this.keepAlive = config.keepAlive ?? EXTERNAL_SERVICES_CONFIG.OLLAMA_KEEP_ALIVE;
   }
 
   /**
@@ -326,6 +330,7 @@ export class OllamaClient {
           model: options.model,
           prompt: options.prompt,
           stream: options.stream || false,
+          keep_alive: this.keepAlive,
           options: {
             temperature: options.temperature || this.defaultTemperature,
             top_p: options.topP || 0.9,
@@ -366,6 +371,7 @@ export class OllamaClient {
           model: options.model,
           messages: options.messages,
           stream: options.stream || false,
+          keep_alive: this.keepAlive,
           options: {
             temperature: options.temperature || this.defaultTemperature,
             top_p: options.topP || 0.9,
