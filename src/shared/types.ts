@@ -124,7 +124,7 @@ export interface ResourceUsage {
 // Simplified Job Context Types
 // ============================================================================
 
-import { JobCategory as JobCategoryConst, type JobCategoryType } from './job-category.js';
+import { JobCategory as JobCategoryConst, type JobCategoryType, type FileOperationType } from './job-category.js';
 
 export const JobCategory = JobCategoryConst;
 export type { JobCategoryType };
@@ -261,19 +261,14 @@ export interface ScriptJobContext extends BaseJobContext {
   timeout?: number;
   workingDirectory?: string;
   environment?: Record<string, string>;
+  input?: string;       // stdin to feed to the process
+  args?: string[];      // additional CLI arguments
+  workspaceId?: string; // resolve workingDirectory relative to workspace rootPath
+  // Legacy fields kept for backwards compatibility (ignored by new executor)
   dependencies?: string[];
   outputType?: OutputType;
-  detached?: boolean; // If true, run process in background (detached)
-  pidFile?: string; // Optional file path to store the process PID
-}
-
-/**
- * File request job context
- */
-export interface FileRequestJobContext extends BaseJobContext {
-  category: (typeof JobCategoryConst)['FILE_REQUEST'];
-  requester: string;
-  fileName: string;
+  detached?: boolean;
+  pidFile?: string;
 }
 
 /**
@@ -362,7 +357,6 @@ export interface ImageJobContext extends BaseJobContext {
 export type JobContext =
   | LLMJobContext
   | ScriptJobContext
-  | FileRequestJobContext
   | ImageGenerationJobContext
   | HttpRequestJobContext
   | ImageJobContext
@@ -370,9 +364,9 @@ export type JobContext =
   | ModelManagementJobContext
   | WorkerUpdateJobContext
   | WorkerConfigJobContext
-  | FileFetchJobContext
-  | FileUploadJobContext
-  | FFMPEGJobContext;
+  | FFMPEGJobContext
+  | FileJobContext
+  | FileTransferJobContext;
 
 /**
  * Type guard functions for job contexts
@@ -385,12 +379,6 @@ export function isScriptJobContext(
   context: JobContext
 ): context is ScriptJobContext {
   return context.category === JobCategoryConst.SCRIPT;
-}
-
-export function isFileRequestJobContext(
-  context: JobContext
-): context is FileRequestJobContext {
-  return context.category === JobCategoryConst.FILE_REQUEST;
 }
 
 export function isImageGenerationJobContext(
@@ -507,38 +495,6 @@ export function isWorkerConfigJobContext(
 }
 
 /**
- * File fetch job context
- * Worker downloads an artifact from storage to a local path
- */
-export interface FileFetchJobContext extends BaseJobContext {
-  category: (typeof JobCategoryConst)['FILE_FETCH'];
-  artifactId: string;
-  artifactUrl: string;
-  destinationPath: string;
-}
-
-export function isFileFetchJobContext(
-  context: JobContext
-): context is FileFetchJobContext {
-  return context.category === JobCategoryConst.FILE_FETCH;
-}
-
-/**
- * File upload job context
- * Worker uploads a local file to artifact storage and returns the URL
- */
-export interface FileUploadJobContext extends BaseJobContext {
-  category: (typeof JobCategoryConst)['FILE_UPLOAD'];
-  filePath: string;
-}
-
-export function isFileUploadJobContext(
-  context: JobContext
-): context is FileUploadJobContext {
-  return context.category === JobCategoryConst.FILE_UPLOAD;
-}
-
-/**
  * FFMPEG job context
  * Runs ffmpeg with the given arguments on the worker
  */
@@ -556,6 +512,70 @@ export function isFFMPEGJobContext(
   context: JobContext
 ): context is FFMPEGJobContext {
   return context.category === JobCategoryConst.FFMPEG;
+}
+
+/**
+ * Unified file operations job context
+ */
+export interface FileJobContext extends BaseJobContext {
+  category: (typeof JobCategoryConst)['FILE'];
+  operation: FileOperationType;
+  path: string;
+  content?: string;          // inline text or base64 for 'write'
+  artifactJobId?: string;    // source job ID for 'upload'
+  artifactName?: string;     // artifact filename for 'upload'
+  destination?: string;      // for 'move'
+  recursive?: boolean;       // for 'delete'
+  workspaceId?: string;      // workspace to resolve rootPath from
+}
+
+export function isFileJobContext(context: JobContext): context is FileJobContext {
+  return context.category === JobCategoryConst.FILE;
+}
+
+/**
+ * File transfer job context
+ * Used for worker-to-worker file transfer via chunked artifact relay,
+ * with optional P2P direct streaming on the same LAN.
+ */
+export interface FileTransferJobContext extends BaseJobContext {
+  category: (typeof JobCategoryConst)['FILE_TRANSFER'];
+  transferId: string;
+  operation: 'send' | 'receive_chunk';
+  fileName: string;
+  destinationPath: string;
+  fileChecksum: string;
+  totalSize: number;
+
+  // 'send' operation fields
+  sourcePath?: string;
+  receiverDeviceId?: string;
+  receiverWorkerId?: string;
+  chunkSizeBytes?: number;
+
+  // 'receive_chunk' operation fields
+  chunkIndex?: number;
+  totalChunks?: number;
+  chunkArtifactJobId?: string;
+  chunkArtifactName?: string;
+  chunkChecksum?: string;
+  senderDirectUrl?: string;
+}
+
+export function isFileTransferJobContext(
+  context: JobContext
+): context is FileTransferJobContext {
+  return context.category === JobCategoryConst.FILE_TRANSFER;
+}
+
+/**
+ * Workspace definition for worker-path resolution
+ */
+export interface Workspace {
+  id: string;
+  name: string;
+  workerId: string;
+  rootPath: string;
 }
 
 // ============================================================================

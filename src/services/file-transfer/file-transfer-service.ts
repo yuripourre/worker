@@ -1,171 +1,135 @@
-import { LocalServer, LocalServerConfig } from '../../local-server';
-import { FileTransferClient, FileTransferClientConfig, FileTransferRequest } from './file-transfer-client';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join, dirname, basename, extname } from 'path';
 
-export interface FileTransferServiceConfig {
+export interface FileTransferServiceOptions {
   serverPort: number;
   uploadDir: string;
+  clientTimeout?: number;
   authToken?: string;
-  clientTimeout: number;
 }
 
+export interface FileTransferStatus {
+  running: boolean;
+  port: number;
+  uploadDir: string;
+}
+
+const HEALTH_PATH = '/health';
+const UPLOAD_PATH = '/upload';
+
+/**
+ * Lightweight HTTP server running on a worker that accepts incoming file pushes
+ * from other workers via FileTransferClient. Uses Bun.serve() for streaming.
+ */
 export class FileTransferService {
-  private server?: LocalServer;
-  private client: FileTransferClient;
-  private config: FileTransferServiceConfig;
-  private isStarted: boolean = false;
-  private useExistingServer: boolean = false;
+  private server: ReturnType<typeof Bun.serve> | null = null;
+  private readonly options: Required<FileTransferServiceOptions>;
 
-  constructor(config: Partial<FileTransferServiceConfig & { existingServer?: LocalServer }> = {}) {
-    this.config = {
-      serverPort: config.serverPort || 51115,
-      uploadDir: config.uploadDir || './uploads',
-      authToken: config.authToken,
-      clientTimeout: config.clientTimeout || 30000
+  constructor(options: FileTransferServiceOptions) {
+    this.options = {
+      clientTimeout: 30000,
+      authToken: '',
+      ...options,
     };
-
-    // If an existing server is provided, use it instead of creating a new one
-    if ((config as any).existingServer) {
-      this.server = (config as any).existingServer;
-      this.useExistingServer = true;
-      console.log('📁 FileTransferService: Using existing LocalServer instance');
-    } else {
-      // Ensure upload directory exists
-      if (!existsSync(this.config.uploadDir)) {
-        mkdirSync(this.config.uploadDir, { recursive: true });
-      }
-
-      // Initialize server
-      const serverConfig: LocalServerConfig = {
-        port: this.config.serverPort,
-        uploadDir: this.config.uploadDir,
-        authToken: this.config.authToken
-      };
-
-      this.server = new LocalServer(serverConfig);
-    }
-
-    // Initialize client
-    const clientConfig: FileTransferClientConfig = {
-      timeout: this.config.clientTimeout
-    };
-
-    this.client = new FileTransferClient(clientConfig);
   }
 
-  /**
-   * Start the file transfer service (starts the server)
-   */
   async start(): Promise<void> {
-    if (this.isStarted) {
-      console.log('📁 File transfer service already started');
-      return;
-    }
+    if (this.server) return;
 
-    // If using an existing server, just mark as started (server is already running)
-    if (this.useExistingServer && this.server?.isServerRunning()) {
-      this.isStarted = true;
-      console.log(`📁 File transfer service using existing server on port ${this.config.serverPort}`);
-      return;
-    }
+    mkdirSync(this.options.uploadDir, { recursive: true });
 
-    if (!this.server) {
-      throw new Error('Server not initialized');
-    }
-
-    try {
-      await this.server.start();
-      this.isStarted = true;
-      console.log(`📁 File transfer service started on port ${this.config.serverPort}`);
-    } catch (error) {
-      console.error('❌ Failed to start file transfer service:', error);
-      throw error;
-    }
+    this.server = Bun.serve({
+      port: this.options.serverPort,
+      fetch: (req) => this.handleRequest(req),
+    });
   }
 
-  /**
-   * Stop the file transfer service
-   */
   async stop(): Promise<void> {
-    if (!this.isStarted) {
-      return;
-    }
-
-    // Don't stop the server if we're using an existing one (it's managed elsewhere)
-    if (this.useExistingServer) {
-      this.isStarted = false;
-      console.log('📁 File transfer service stopped (using existing server - not stopping it)');
-      return;
-    }
-
-    if (!this.server) {
-      return;
-    }
-
-    try {
-      await this.server.stop();
-      this.isStarted = false;
-      console.log('📁 File transfer service stopped');
-    } catch (error) {
-      console.error('❌ Failed to stop file transfer service:', error);
-      throw error;
+    if (this.server) {
+      this.server.stop(true);
+      this.server = null;
     }
   }
 
-  /**
-   * Send a file to another worker
-   */
-  async sendFile(targetIp: string, targetPort: number, filePath: string, fileName?: string): Promise<any> {
-    const request: FileTransferRequest = {
-      targetIp,
-      targetPort,
-      filePath,
-      fileName,
-      authToken: this.config.authToken
-    };
-
-    return await this.client.sendFile(request);
-  }
-
-  /**
-   * Test connection to another worker
-   */
-  async testConnection(targetIp: string, targetPort: number): Promise<boolean> {
-    return await this.client.testConnection(targetIp, targetPort);
-  }
-
-  /**
-   * Get the server port
-   */
-  getServerPort(): number {
-    return this.config.serverPort;
-  }
-
-  /**
-   * Get the upload directory
-   */
-  getUploadDir(): string {
-    return this.config.uploadDir;
-  }
-
-  /**
-   * Check if service is running
-   */
   isRunning(): boolean {
-    if (!this.server) {
-      return false;
-    }
-    return this.isStarted && this.server.isServerRunning();
+    return this.server !== null;
   }
 
-  /**
-   * Get service status
-   */
-  getStatus(): { running: boolean; port: number; uploadDir: string } {
+  getServerPort(): number {
+    return this.options.serverPort;
+  }
+
+  getStatus(): FileTransferStatus {
     return {
       running: this.isRunning(),
-      port: this.config.serverPort,
-      uploadDir: this.config.uploadDir
+      port: this.options.serverPort,
+      uploadDir: this.options.uploadDir,
     };
+  }
+
+  private async handleRequest(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+
+    if (url.pathname === HEALTH_PATH && req.method === 'GET') {
+      return Response.json({ status: 'ok', port: this.options.serverPort });
+    }
+
+    if (url.pathname === UPLOAD_PATH && req.method === 'POST') {
+      return this.handleUpload(req);
+    }
+
+    return new Response('Not Found', { status: 404 });
+  }
+
+  private async handleUpload(req: Request): Promise<Response> {
+    if (this.options.authToken) {
+      const token = req.headers.get('x-auth-token') ?? req.headers.get('authorization')?.replace('Bearer ', '');
+      if (token !== this.options.authToken) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+    }
+
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch {
+      return Response.json({ error: 'Failed to parse form data' }, { status: 400 });
+    }
+
+    const file = formData.get('file') as File | null;
+    if (!file) {
+      return Response.json({ error: 'No file provided' }, { status: 400 });
+    }
+
+    const targetPath = (formData.get('targetPath') as string | null) ?? '';
+    const requestedName = (formData.get('fileName') as string | null) ?? file.name ?? 'upload';
+
+    const destDir = targetPath
+      ? join(this.options.uploadDir, targetPath)
+      : this.options.uploadDir;
+    mkdirSync(destDir, { recursive: true });
+
+    const safeFileName = this.makeUniqueFileName(destDir, requestedName);
+    const destPath = join(destDir, safeFileName);
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    writeFileSync(destPath, buffer);
+
+    return Response.json({
+      success: true,
+      fileName: safeFileName,
+      fileSize: buffer.length,
+      path: destPath,
+    });
+  }
+
+  private makeUniqueFileName(dir: string, name: string): string {
+    const ext = extname(name);
+    const base = basename(name, ext);
+    const candidate = name;
+    if (!existsSync(join(dir, candidate))) return candidate;
+    const ts = Date.now();
+    const rand = Math.floor(Math.random() * 10000);
+    return `${base}_${ts}_${rand}${ext}`;
   }
 }

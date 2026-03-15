@@ -8,7 +8,7 @@ import { join, basename, resolve } from 'path';
  * Worker Config Category Executor
  * Handles WORKER_CONFIG jobs: get/set runtime configuration and create folders.
  * Replaces the /config/* and /files/create-folder endpoints previously served by
- * the local server on port 51115.
+ * the direct local HTTP channel (now removed).
  */
 export class WorkerConfigCategoryExecutor implements CategoryExecutor {
   constructor(

@@ -966,7 +966,9 @@ export class Worker {
       getConfig,
       this.config.ollamaBaseUrl,
       this.config.comfyuiPath,
-      setConfig
+      setConfig,
+      undefined,
+      this.getLocalIpAddress()
     );
     this.log('info', 'Executor initialized');
   }

@@ -4,6 +4,7 @@
  */
 
 export * from './types';
+export { FILE_OPERATIONS, FILE_OPERATION_LIST, type FileOperationType } from './job-category';
 export * from './job-utils';
 export * from './config';
 export * from './worker-types';

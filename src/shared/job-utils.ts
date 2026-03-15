@@ -3,7 +3,6 @@ import { JobCategory } from './types';
 import {
   isLLMJobContext,
   isScriptJobContext,
-  isFileRequestJobContext,
   isImageGenerationJobContext,
   isHttpRequestJobContext,
   isImageJobContext,
@@ -170,14 +169,6 @@ export function createJobContextFromFormData(
           : undefined,
       };
 
-    case 'file_request':
-      return {
-        ...baseContext,
-        category: JobCategory.FILE_REQUEST,
-        requester: String(formData.requester || ''),
-        fileName: String(formData.fileName || ''),
-      };
-
     case 'image_generation':
       return {
         ...baseContext,
@@ -327,13 +318,6 @@ export function validateJobContext(context: JobContext): {
       errors.push('Script content is required for script jobs');
     }
     if (!context.language) errors.push('Language is required for script jobs');
-  } else if (isFileRequestJobContext(context)) {
-    if (!context.requester || context.requester.trim() === '') {
-      errors.push('Requester is required for file request jobs');
-    }
-    if (!context.fileName || context.fileName.trim() === '') {
-      errors.push('File name is required for file request jobs');
-    }
   } else if (isImageGenerationJobContext(context)) {
     if (!context.prompt || context.prompt.trim() === '') {
       errors.push('Prompt is required for image generation jobs');

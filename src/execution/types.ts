@@ -10,4 +10,5 @@ export type {
   ExecutableJobResult,
   IJobExecutor,
   ExecutorConfig,
+  Workspace,
 } from '../shared';

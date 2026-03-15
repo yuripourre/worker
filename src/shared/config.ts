@@ -58,10 +58,6 @@ export const WORKER_CONFIG = {
    */
   DEFAULT_JOB_REQUEST_INTERVAL_SEC: 30,
 
-  /**
-   * Worker file server port (for LocalServer)
-   */
-  FILE_SERVER_PORT: 51115,
 
   /**
    * Delay before reconnecting after a clean long-poll timeout (ms).
@@ -374,6 +370,17 @@ export const RESPONSE_MESSAGES = {
   FAILED_TO_REGISTER_DEVICE: 'Failed to register device',
   FAILED_TO_REFRESH_DEVICES: 'Failed to refresh devices',
   REFRESH_COMPLETED: 'Refresh completed successfully',
+} as const;
+
+// ============================================================================
+// File Transfer Configuration
+// ============================================================================
+
+export const FILE_TRANSFER_CONFIG = {
+  CHUNK_SIZE_BYTES: 32 * 1024 * 1024,
+  P2P_SERVER_TIMEOUT_MS: 10 * 60 * 1000,
+  P2P_CONNECT_TIMEOUT_MS: 5000,
+  TRANSFER_STATE_DIR: '.job-transfers',
 } as const;
 
 // ============================================================================
